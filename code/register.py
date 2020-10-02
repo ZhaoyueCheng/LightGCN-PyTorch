@@ -12,6 +12,9 @@ elif world.dataset in ['amazon-music', 'amazon-grocery']:
     dataset = dataloader.AmazonLoader(path="../data/"+world.dataset)
 elif world.dataset == 'ml':
     dataset = dataloader.MlLoader(path="../data/ml/")
+else:
+    dataset = dataloader.AmazonLoader(path="../data/" + world.dataset)
+
 
 
 print('===========config================')
