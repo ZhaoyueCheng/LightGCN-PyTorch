@@ -507,7 +507,7 @@ class AmazonLoader(BasicDataset):
 
     def __init__(self, config=world.config, path="../data/amazon-music"):
         import pickle
-        path = "../data/amazon-cd/"
+        path = "../data/yelp/"
         # train or test
         cprint(f'loading [{path}]')
         self.split = config['A_split']
