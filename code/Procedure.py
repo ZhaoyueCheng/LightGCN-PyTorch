@@ -36,7 +36,7 @@ def BPR_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, w=N
     users = users.to(world.device)
     posItems = posItems.to(world.device)
     negItems = negItems.to(world.device)
-    users, posItems, negItems = utils.shuffle(users, posItems, negItems)
+    users, posItems, negItems = utils.shuffle(users,  posItems, negItems)
     total_batch = len(users) // world.config['bpr_batch_size'] + 1
     aver_loss = 0.
     for (batch_i,
@@ -110,12 +110,12 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=0):
             rating[exclude_index, exclude_items] = -(1<<10)
             _, rating_K = torch.topk(rating, k=max_K)
             rating = rating.cpu().numpy()
-            aucs = [ 
-                    utils.AUC(rating[i],
-                              dataset, 
-                              test_data) for i, test_data in enumerate(groundTrue)
-                ]
-            auc_record.extend(aucs)
+            # aucs = [
+            #         utils.AUC(rating[i],
+            #                   dataset,
+            #                   test_data) for i, test_data in enumerate(groundTrue)
+            #     ]
+            # auc_record.extend(aucs)
             del rating
             users_list.append(batch_users)
             rating_list.append(rating_K.cpu())
@@ -136,7 +136,7 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=0):
         results['recall'] /= float(len(users))
         results['precision'] /= float(len(users))
         results['ndcg'] /= float(len(users))
-        results['auc'] = np.mean(auc_record)
+        # results['auc'] = np.mean(auc_record)
         if world.tensorboard:
             w.add_scalars(f'Test/Recall@{world.topks}',
                           {str(world.topks[i]): results['recall'][i] for i in range(len(world.topks))}, epoch)
