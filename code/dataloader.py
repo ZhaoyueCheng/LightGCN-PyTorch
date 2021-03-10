@@ -648,20 +648,20 @@ class AmazonLoader(BasicDataset):
                 adj_mat = adj_mat.todok()
                 # adj_mat = adj_mat + sp.eye(adj_mat.shape[0])
 
-                # rowsum = np.array(adj_mat.sum(axis=1))
-                # d_inv = np.power(rowsum, -0.5).flatten()
-                # d_inv[np.isinf(d_inv)] = 0.
-                # d_mat = sp.diags(d_inv)
-                #
-                # norm_adj = d_mat.dot(adj_mat)
-                # norm_adj = norm_adj.dot(d_mat)
-                # norm_adj = norm_adj.tocsr()
-
-                rowsum = np.array(adj_mat.sum(1))
-                d_inv = np.power(rowsum, -1).flatten()
+                rowsum = np.array(adj_mat.sum(axis=1))
+                d_inv = np.power(rowsum, -0.5).flatten()
                 d_inv[np.isinf(d_inv)] = 0.
-                d_mat_inv = sp.diags(d_inv)
-                norm_adj = d_mat_inv.dot(adj_mat).tocsr()
+                d_mat = sp.diags(d_inv)
+
+                norm_adj = d_mat.dot(adj_mat)
+                norm_adj = norm_adj.dot(d_mat)
+                norm_adj = norm_adj.tocsr()
+
+                # rowsum = np.array(adj_mat.sum(1))
+                # d_inv = np.power(rowsum, -1).flatten()
+                # d_inv[np.isinf(d_inv)] = 0.
+                # d_mat_inv = sp.diags(d_inv)
+                # norm_adj = d_mat_inv.dot(adj_mat).tocsr()
 
                 end = time()
                 print(f"costing {end - s}s, saved norm_mat...")

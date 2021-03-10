@@ -10,7 +10,7 @@ import argparse
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Go lightGCN")
-    parser.add_argument('--bpr_batch', type=int,default=2048,
+    parser.add_argument('--bpr_batch', type=int,default=500,
                         help="the batch size for bpr loss training procedure")
     parser.add_argument('--recdim', type=int,default=50,
                         help="the embedding size of lightGCN")
@@ -28,7 +28,7 @@ def parse_args():
                         help="the fold num used to split large adj matrix, like gowalla")
     parser.add_argument('--testbatch', type=int,default=10000,
                         help="the batch size of users for testing")
-    parser.add_argument('--dataset', type=str,default='yelp',
+    parser.add_argument('--dataset', type=str,default='amazon-cd',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
     parser.add_argument('--path', type=str,default="./checkpoints",
                         help="path to save weights")
@@ -42,6 +42,6 @@ def parse_args():
     parser.add_argument('--multicore', type=int, default=1, help='whether we use multiprocessing or not in test')
     parser.add_argument('--pretrain', type=int, default=0, help='whether we use pretrained weight or not')
     # parser.add_argument('--seed', type=int, default=2020, help='random seed')
-    parser.add_argument('--seed', type=int, default=5678, help='random seed')
+    parser.add_argument('--seed', type=int, default=1234, help='random seed')
     parser.add_argument('--model', type=str, default='lgn', help='rec-model, support [mf, lgn]')
     return parser.parse_args()
