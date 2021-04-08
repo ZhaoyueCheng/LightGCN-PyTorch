@@ -17,7 +17,8 @@ from register import dataset
 
 Recmodel = register.MODELS[world.model_name](world.config, dataset)
 Recmodel = Recmodel.to(world.device)
-bpr = utils.BPRLoss(Recmodel, world.config)
+# bpr = utils.BPRLoss(Recmodel, world.config)
+metric = utils.MetricLoss(Recmodel, world.config)
 
 weight_file = utils.getFileName()
 print(f"load and save to {weight_file}")
@@ -27,7 +28,7 @@ if world.LOAD:
         world.cprint(f"loaded model weights from {weight_file}") 
     except FileNotFoundError:
         print(f"{weight_file} not exists, start from beginning")
-Neg_k = 1
+Neg_k = 10
 
 # init tensorboard
 if world.tensorboard:
@@ -46,7 +47,7 @@ try:
         if epoch % 10 == 0:
             cprint("[TEST]")
             Procedure.Test(dataset, Recmodel, epoch, w, world.config['multicore'])
-        output_information = Procedure.BPR_train_original(dataset, Recmodel, bpr, epoch, neg_k=Neg_k,w=w)
+        output_information = Procedure.Metric_train_original(dataset, Recmodel, metric, epoch, neg_k=Neg_k, w=w)
         
         print(f'[saved][{output_information}]')
         torch.save(Recmodel.state_dict(), weight_file)

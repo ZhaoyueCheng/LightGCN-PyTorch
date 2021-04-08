@@ -47,6 +47,9 @@ config['pretrain'] = args.pretrain
 config['A_split'] = False
 config['bigdata'] = False
 
+# metric learning config
+config['margin'] = args.margin
+
 GPU = torch.cuda.is_available()
 device = torch.device('cuda' if GPU else "cpu")
 CORES = multiprocessing.cpu_count() // 2

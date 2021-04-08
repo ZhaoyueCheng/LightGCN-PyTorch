@@ -96,6 +96,7 @@ class LightGCN(BasicModel):
         self.n_layers = self.config['lightGCN_n_layers']
         self.keep_prob = self.config['keep_prob']
         self.A_split = self.config['A_split']
+        self.margin = self.config['margin']
         self.embedding_user = torch.nn.Embedding(
             num_embeddings=self.num_users, embedding_dim=self.latent_dim)
         self.embedding_item = torch.nn.Embedding(
@@ -164,14 +165,15 @@ class LightGCN(BasicModel):
         embs = torch.stack(embs, dim=1)
         #print(embs.size())
         light_out = torch.mean(embs, dim=1)
+        # light_out = embs.view(embs.shape[0], -1)
         users, items = torch.split(light_out, [self.num_users, self.num_items])
         return users, items
     
     def getUsersRating(self, users):
         all_users, all_items = self.computer()
-        users_emb = all_users[users.long()]
-        items_emb = all_items
-        rating = self.f(torch.matmul(users_emb, items_emb.t()))
+        users_emb = all_users[users.long()].unsqueeze(1)
+        items_emb = all_items.unsqueeze(0)
+        rating = -torch.sum((users_emb - items_emb) ** 2, 2)
         return rating
     
     def getEmbedding(self, users, pos_items, neg_items):
@@ -184,28 +186,58 @@ class LightGCN(BasicModel):
         neg_emb_ego = self.embedding_item(neg_items)
         return users_emb, pos_emb, neg_emb, users_emb_ego, pos_emb_ego, neg_emb_ego
     
-    def bpr_loss(self, users, pos, neg):
-        (users_emb, pos_emb, neg_emb, 
-        userEmb0,  posEmb0, negEmb0) = self.getEmbedding(users.long(), pos.long(), neg.long())
-        reg_loss = (1/2)*(userEmb0.norm(2).pow(2) + 
-                         posEmb0.norm(2).pow(2)  +
-                         negEmb0.norm(2).pow(2))/float(len(users))
-        pos_scores = torch.mul(users_emb, pos_emb)
-        pos_scores = torch.sum(pos_scores, dim=1)
-        neg_scores = torch.mul(users_emb, neg_emb)
-        neg_scores = torch.sum(neg_scores, dim=1)
-        
-        loss = torch.mean(torch.nn.functional.softplus(neg_scores - pos_scores))
-        
+    # def bpr_loss(self, users, pos, neg):
+    #     (users_emb, pos_emb, neg_emb,
+    #     userEmb0,  posEmb0, negEmb0) = self.getEmbedding(users.long(), pos.long(), neg.long())
+    #     reg_loss = (1/2)*(userEmb0.norm(2).pow(2) +
+    #                      posEmb0.norm(2).pow(2)  +
+    #                      negEmb0.norm(2).pow(2))/float(len(users))
+    #     pos_scores = torch.mul(users_emb, pos_emb)
+    #     pos_scores = torch.sum(pos_scores, dim=1)
+    #     neg_scores = torch.mul(users_emb, neg_emb)
+    #     neg_scores = torch.sum(neg_scores, dim=1)
+    #
+    #     loss = torch.mean(torch.nn.functional.softplus(neg_scores - pos_scores))
+    #
+    #     return loss, reg_loss
+
+    def metric_loss(self, users, pos, neg):
+        (users_emb, pos_emb, neg_emb,
+         userEmb0, posEmb0, negEmb0) = self.getEmbedding(users.long(), pos.long(), neg.long())
+        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) +
+                              posEmb0.norm(2).pow(2) +
+                              negEmb0.norm(2).pow(2)) / float(len(users))
+
+        pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
+        neg_distances = torch.sum((users_emb.unsqueeze(-2) - neg_emb) ** 2, -1)
+        closest_negative_item_distances = neg_distances.min(1)[0]
+
+        distance = pos_distances - closest_negative_item_distances + self.margin
+        loss = torch.nn.functional.relu(distance)
+
         return loss, reg_loss
+
+    def clip_norm_op(self, clip_norm=1):
+        norm_user = (self.embedding_user.weight.data ** 2).sum(-1, keepdim=True)
+        self.embedding_user.weight.data = torch.where(norm_user < clip_norm ** 2,
+                                                      self.embedding_user.weight.data,
+                                                      self.embedding_user.weight.data * clip_norm / (norm_user + 1e-12))
+
+        norm_item = (self.embedding_item.weight.data ** 2).sum(-1, keepdim=True)
+        self.embedding_item.weight.data = torch.where(norm_item < clip_norm ** 2,
+                                                      self.embedding_item.weight.data,
+                                                      self.embedding_item.weight.data * clip_norm / (norm_item + 1e-12))
+
+        # self.embedding_user.weight.data = torch.nn.functional.normalize(self.embedding_user.weight.data, 2, -1)
+        # self.embedding_item.weight.data = torch.nn.functional.normalize(self.embedding_item.weight.data, 2, -1)
        
-    def forward(self, users, items):
-        # compute embedding
-        all_users, all_items = self.computer()
-        # print('forward')
-        #all_users, all_items = self.computer()
-        users_emb = all_users[users]
-        items_emb = all_items[items]
-        inner_pro = torch.mul(users_emb, items_emb)
-        gamma     = torch.sum(inner_pro, dim=1)
-        return gamma
+    # def forward(self, users, items):
+    #     # compute embedding
+    #     all_users, all_items = self.computer()
+    #     # print('forward')
+    #     #all_users, all_items = self.computer()
+    #     users_emb = all_users[users]
+    #     items_emb = all_items[items]
+    #     inner_pro = torch.mul(users_emb, items_emb)
+    #     gamma     = torch.sum(inner_pro, dim=1)
+    #     return gamma

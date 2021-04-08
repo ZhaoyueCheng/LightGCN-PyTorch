@@ -38,7 +38,29 @@ class BPRLoss:
         
         return loss.cpu().item()
 
-def UniformSample_original(users, dataset):
+class MetricLoss:
+    def __init__(self,
+                 recmodel: PairWiseModel,
+                 config: dict):
+        self.model = recmodel
+        self.weight_decay = config['decay']
+        self.lr = config['lr']
+        self.opt = optim.Adam(recmodel.parameters(), lr=self.lr)
+
+    def stageOne(self, users, pos, neg):
+        loss, reg_loss = self.model.metric_loss(users, pos, neg)
+        reg_loss = reg_loss * self.weight_decay
+        loss = loss.mean() + reg_loss
+
+        self.opt.zero_grad()
+        loss.backward()
+        self.opt.step()
+
+        self.model.clip_norm_op()
+
+        return loss.cpu().item()
+
+def UniformSample_original(users, dataset, neg_k=10):
     """
     the original impliment of BPR Sampling in LightGCN
     :return:
@@ -60,13 +82,16 @@ def UniformSample_original(users, dataset):
         sample_time2 += time() - start
         posindex = np.random.randint(0, len(posForUser))
         positem = posForUser[posindex]
-        while True:
-            negitem = np.random.randint(0, dataset.m_items)
-            if negitem in posForUser:
-                continue
-            else:
-                break
-        S.append([user, positem, negitem])
+
+        negitem = np.random.randint(0, dataset.m_items, size=neg_k)
+        for j, neg in enumerate(negitem):
+            while neg in posForUser:
+                negitem[j] = neg = np.random.randint(0, dataset.m_items)
+
+        t = [user, positem]
+        t.extend(negitem)
+        S.append(t)
+
         end = time()
         sample_time1 += end - start
     total = time() - total_start

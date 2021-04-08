@@ -22,16 +22,16 @@ from sklearn.metrics import roc_auc_score
 CORES = multiprocessing.cpu_count() // 2
 
 
-def BPR_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, w=None):
+def Metric_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, w=None):
     Recmodel = recommend_model
     Recmodel.train()
-    bpr: utils.BPRLoss = loss_class
+    metric: utils.MetricLoss = loss_class
     allusers = list(range(dataset.n_users))
-    S, sam_time = utils.UniformSample_original(allusers, dataset)
+    S, sam_time = utils.UniformSample_original(allusers, dataset, neg_k=neg_k)
     print(f"BPR[sample time][{sam_time[0]:.1f}={sam_time[1]:.2f}+{sam_time[2]:.2f}]")
     users = torch.Tensor(S[:, 0]).long()
     posItems = torch.Tensor(S[:, 1]).long()
-    negItems = torch.Tensor(S[:, 2]).long()
+    negItems = torch.Tensor(S[:, 2:]).long()
 
     users = users.to(world.device)
     posItems = posItems.to(world.device)
@@ -46,7 +46,7 @@ def BPR_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, w=N
                                                    posItems,
                                                    negItems,
                                                    batch_size=world.config['bpr_batch_size'])):
-        cri = bpr.stageOne(batch_users, batch_pos, batch_neg)
+        cri = metric.stageOne(batch_users, batch_pos, batch_neg)
         aver_loss += cri
         if world.tensorboard:
             w.add_scalar(f'BPRLoss/BPR', cri, epoch * int(len(users) / world.config['bpr_batch_size']) + batch_i)
@@ -107,7 +107,7 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=0):
             for range_i, items in enumerate(allPos):
                 exclude_index.extend([range_i] * len(items))
                 exclude_items.extend(items)
-            rating[exclude_index, exclude_items] = -(1<<10)
+            rating[exclude_index, exclude_items] = np.NINF
             _, rating_K = torch.topk(rating, k=max_K)
             rating = rating.cpu().numpy()
             # aucs = [
