@@ -18,7 +18,7 @@ def parse_args():
                         help="the layer num of lightGCN")
     parser.add_argument('--lr', type=float,default=0.001,
                         help="the learning rate")
-    parser.add_argument('--decay', type=float,default=0,
+    parser.add_argument('--decay', type=float,default=0.01,
                         help="the weight decay for l2 normalizaton")
     parser.add_argument('--dropout', type=int,default=0,
                         help="using the dropout or not")
@@ -28,7 +28,7 @@ def parse_args():
                         help="the fold num used to split large adj matrix, like gowalla")
     parser.add_argument('--testbatch', type=int,default=100,
                         help="the batch size of users for testing")
-    parser.add_argument('--dataset', type=str,default='TAFA',
+    parser.add_argument('--dataset', type=str,default='TAFA-grocery',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
     parser.add_argument('--path', type=str,default="./checkpoints",
                         help="path to save weights")
@@ -45,5 +45,5 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=1234, help='random seed')
     parser.add_argument('--model', type=str, default='lgn', help='rec-model, support [mf, lgn]')
     # new CML arguments
-    parser.add_argument('--margin', type=float, default=0.3, help="margin for the cml loss")
+    parser.add_argument('--margin', type=float, default=0.5, help="margin for the cml loss")
     return parser.parse_args()

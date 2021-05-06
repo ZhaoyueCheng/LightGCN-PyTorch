@@ -50,13 +50,14 @@ class MetricLoss:
     def stageOne(self, users, pos, neg):
         loss, reg_loss = self.model.metric_loss(users, pos, neg)
         reg_loss = reg_loss * self.weight_decay
-        loss = loss.mean() + reg_loss
+        loss = loss.sum() + reg_loss
 
         self.opt.zero_grad()
         loss.backward()
         self.opt.step()
 
-        self.model.clip_norm_op()
+        # self.model.clip_norm_op()
+        # self.model.normalize_op()
 
         return loss.cpu().item()
 

@@ -164,7 +164,8 @@ class LightGCN(BasicModel):
             embs.append(all_emb)
         embs = torch.stack(embs, dim=1)
         #print(embs.size())
-        light_out = torch.mean(embs, dim=1)
+        # light_out = torch.mean(embs, dim=1)
+        light_out = torch.sum(embs, dim=1)
         # light_out = embs.view(embs.shape[0], -1)
         users, items = torch.split(light_out, [self.num_users, self.num_items])
         return users, items
@@ -207,9 +208,14 @@ class LightGCN(BasicModel):
         reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) +
                               posEmb0.norm(2).pow(2) +
                               negEmb0.norm(2).pow(2)) / float(len(users))
+        embedding_aug = True
+        if embedding_aug:
+            neg_items = self.get_embedding_aug(neg_emb, 5, False, 5)
+        else:
+            neg_items = neg_emb
 
         pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
-        neg_distances = torch.sum((users_emb.unsqueeze(-2) - neg_emb) ** 2, -1)
+        neg_distances = torch.sum((users_emb.unsqueeze(-2) - neg_items) ** 2, -1)
         closest_negative_item_distances = neg_distances.min(1)[0]
 
         distance = pos_distances - closest_negative_item_distances + self.margin
@@ -230,6 +236,10 @@ class LightGCN(BasicModel):
 
         # self.embedding_user.weight.data = torch.nn.functional.normalize(self.embedding_user.weight.data, 2, -1)
         # self.embedding_item.weight.data = torch.nn.functional.normalize(self.embedding_item.weight.data, 2, -1)
+
+    def normalize_op(self):
+        self.embedding_user.weight.data = torch.nn.functional.normalize(self.embedding_user.weight.data, 2, -1)
+        self.embedding_item.weight.data = torch.nn.functional.normalize(self.embedding_item.weight.data, 2, -1)
        
     # def forward(self, users, items):
     #     # compute embedding
@@ -241,3 +251,49 @@ class LightGCN(BasicModel):
     #     inner_pro = torch.mul(users_emb, items_emb)
     #     gamma     = torch.sum(inner_pro, dim=1)
     #     return gamma
+
+    def get_embedding_aug(self, embeddings, n_inner_pts=5, normalize=True, num_synthetic=5):
+
+        # N = batch size,
+        # K = embedding size,
+        # W = number of negative samples per a user-positive-item pair
+
+        # negative item embedding (N, W, K)
+        num_neg = embeddings.shape[1]
+
+        import itertools
+        all_combinations = list(itertools.combinations(range(num_neg), 2))
+        import random
+        random.shuffle(all_combinations)
+        all_combinations = all_combinations[:num_synthetic]
+
+        axes_point_0 = [x[0] for x in all_combinations]
+        axes_point_1 = [x[1] for x in all_combinations]
+
+        axes_embeddings_0 = embeddings.clone()[:, axes_point_0, :]
+        axes_embeddings_1 = embeddings.clone()[:, axes_point_1, :]
+
+        concat_embeddings = embeddings.clone()
+
+        total_length = float(n_inner_pts + 1)
+
+        for n_idx in range(n_inner_pts):
+            left_length = float(n_idx + 1)
+            right_length = total_length - left_length
+
+            inner_pts = (axes_embeddings_0 * left_length + axes_embeddings_1 * right_length) / total_length
+
+            if normalize:
+                ## normalize by clipping normalize
+                # inner_pts = clip_by_norm(inner_pts, self.clip_norm)
+                ## normalize by standard normalize function
+                inner_pts = torch.nn.functional.normalize(inner_pts, 2, -1)
+
+                # # test normalize again with original norm
+                # original_norm = (torch.norm(axes_embeddings_0, dim=-1) * left_length +
+                #                  torch.norm(axes_embeddings_1, dim=-1) * right_length) / total_length
+                # inner_pts = inner_pts * original_norm.unsqueeze(-1)
+
+            concat_embeddings = torch.cat((concat_embeddings, inner_pts), dim=1)
+
+        return concat_embeddings
