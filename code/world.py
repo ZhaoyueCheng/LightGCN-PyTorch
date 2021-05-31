@@ -18,7 +18,7 @@ args = parse_args()
 
 # ROOT_PATH = "/Users/gus/Desktop/light-gcn"
 # ROOT_PATH = "/home/ubuntu/LightGCN-PyTorch/"
-ROOT_PATH = "/home/joey/Documents/recsys/LightGCN-PyTorch/"
+ROOT_PATH = "/home/zhaolin/research/LightGCN-PyTorch/"
 CODE_PATH = join(ROOT_PATH, 'code')
 DATA_PATH = join(ROOT_PATH, 'data')
 BOARD_PATH = join(CODE_PATH, 'runs')
