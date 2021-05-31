@@ -26,12 +26,20 @@ def Metric_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, 
     Recmodel = recommend_model
     Recmodel.train()
     metric: utils.MetricLoss = loss_class
-    allusers = list(range(dataset.n_users))
-    S, sam_time = utils.UniformSample_original(allusers, dataset, neg_k=neg_k)
+    S, sam_time = utils.UniformSample_original(dataset, neg_k=neg_k)
     print(f"BPR[sample time][{sam_time[0]:.1f}={sam_time[1]:.2f}+{sam_time[2]:.2f}]")
     users = torch.Tensor(S[:, 0]).long()
     posItems = torch.Tensor(S[:, 1]).long()
     negItems = torch.Tensor(S[:, 2:]).long()
+
+    print(users)
+    print(users.shape)
+    print(posItems)
+    print(posItems.shape)
+    print(negItems)
+    print(negItems.shape)
+
+    return ewq
 
     users = users.to(world.device)
     posItems = posItems.to(world.device)

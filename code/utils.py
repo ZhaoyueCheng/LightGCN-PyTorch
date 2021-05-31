@@ -61,7 +61,7 @@ class MetricLoss:
 
         return loss.cpu().item()
 
-def UniformSample_original(users, dataset, neg_k=10):
+def UniformSample_original(dataset, neg_k=10):
     """
     the original impliment of BPR Sampling in LightGCN
     :return:
@@ -70,19 +70,31 @@ def UniformSample_original(users, dataset, neg_k=10):
     total_start = time()
     dataset : BasicDataset
     user_num = dataset.trainDataSize
-    users = np.random.randint(0, dataset.n_users, user_num)
+    user_idx = np.arange(dataset.n_users)
+    np.random.shuffle(user_idx)
     allPos = dataset.allPos
+
+    user_positive_items_pairs = []
+    num_items_per_user = []
+
     S = []
     sample_time1 = 0.
     sample_time2 = 0.
-    for i, user in enumerate(users):
+    for user in user_idx:
         start = time()
         posForUser = allPos[user]
         if len(posForUser) == 0:
             continue
         sample_time2 += time() - start
-        posindex = np.random.randint(0, len(posForUser))
-        positem = posForUser[posindex]
+
+        # get positive edges
+        for i in posForUser:
+            user_positive_items_pairs.append([user, i])
+        num_items_per_user.append(len(posForUser))
+
+
+
+
 
         negitem = np.random.randint(0, dataset.m_items, size=neg_k)
         for j, neg in enumerate(negitem):
