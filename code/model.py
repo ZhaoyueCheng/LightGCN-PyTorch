@@ -97,6 +97,8 @@ class LightGCN(BasicModel):
         self.keep_prob = self.config['keep_prob']
         self.A_split = self.config['A_split']
         self.margin = self.config['margin']
+        self.alpha = self.config['alpha']
+        self.beta = self.config['beta']
         self.embedding_user = torch.nn.Embedding(
             num_embeddings=self.num_users, embedding_dim=self.latent_dim)
         self.embedding_item = torch.nn.Embedding(
@@ -202,26 +204,83 @@ class LightGCN(BasicModel):
     #
     #     return loss, reg_loss
 
-    def metric_loss(self, users, pos, neg):
+    def metric_loss(self, S, num_items_per_user):
+        users = torch.Tensor(S[:, 0]).long()
+        pos_items = torch.Tensor(S[:, 1]).long()
+        neg_items = torch.Tensor(S[:, 2:]).long()
+
+        users = users.to(world.device)
+        pos_items = pos_items.to(world.device)
+        neg_items = neg_items.to(world.device)
+
         (users_emb, pos_emb, neg_emb,
-         userEmb0, posEmb0, negEmb0) = self.getEmbedding(users.long(), pos.long(), neg.long())
+         userEmb0, posEmb0, negEmb0) = self.getEmbedding(users, pos_items, neg_items)
+        
         reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) +
                               posEmb0.norm(2).pow(2) +
                               negEmb0.norm(2).pow(2)) / float(len(users))
-        embedding_aug = True
-        if embedding_aug:
-            neg_items = self.get_embedding_aug(neg_emb, 5, False, 5)
-        else:
-            neg_items = neg_emb
 
+        # positive item to user distance (N)
         pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
-        neg_distances = torch.sum((users_emb.unsqueeze(-2) - neg_items) ** 2, -1)
-        closest_negative_item_distances = neg_distances.min(1)[0]
+        # distance to negative items (N x W)
+        distance_to_neg_items = torch.sum((users_emb.unsqueeze(-1) - neg_emb.transpose(-2, -1)) ** 2, 1)
 
-        distance = pos_distances - closest_negative_item_distances + self.margin
-        loss = torch.nn.functional.relu(distance)
+        start_idx = 0
+        pos_lengths = []
+        neg_length = []
+        for i in num_items_per_user:
 
-        return loss, reg_loss
+            max_pos_length = pos_distances[start_idx: start_idx+i].max()
+            pos_lengths.append(max_pos_length)
+            
+            min_neg_length = distance_to_neg_items[start_idx: start_idx+i].min()
+            neg_length.append(min_neg_length)
+            
+            start_idx += i
+
+        num_items_per_user = torch.LongTensor(num_items_per_user)
+
+         # negative mining using max pos length
+        pos_lengths = torch.repeat_interleave(torch.tensor(pos_lengths), num_items_per_user)
+        if torch.cuda.is_available():
+            pos_lengths = pos_lengths.to(world.device)
+        neg_idx = (distance_to_neg_items - (self.margin + pos_lengths.unsqueeze(-1))) >= 0
+        distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
+        neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.margin)))).sum()
+
+        # positive mining using min neg length
+        neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
+        if torch.cuda.is_available():
+            neg_length = neg_length.to(world.device)
+        pos_idx = (pos_distances - (neg_length - self.margin)) <= 0
+        pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
+        pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.margin)))).sum()
+        
+        print('neg_total:{:.2f} pos_total:{:.2f}'.format(neg_loss, pos_loss))
+
+        return neg_loss+pos_loss, reg_loss
+
+
+    # def metric_loss(self, users, pos, neg):
+    #     (users_emb, pos_emb, neg_emb,
+    #      userEmb0, posEmb0, negEmb0) = self.getEmbedding(users.long(), pos.long(), neg.long())
+    #     reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) +
+    #                           posEmb0.norm(2).pow(2) +
+    #                           negEmb0.norm(2).pow(2)) / float(len(users))
+    #     embedding_aug = True
+    #     if embedding_aug:
+    #         neg_items = self.get_embedding_aug(neg_emb, 5, False, 5)
+    #     else:
+    #         neg_items = neg_emb
+
+    #     pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
+    #     neg_distances = torch.sum((users_emb.unsqueeze(-2) - neg_items) ** 2, -1)
+    #     closest_negative_item_distances = neg_distances.min(1)[0]
+
+    #     distance = pos_distances - closest_negative_item_distances + self.margin
+    #     loss = torch.nn.functional.relu(distance)
+
+    #     return loss, reg_loss
 
     def clip_norm_op(self, clip_norm=1):
         norm_user = (self.embedding_user.weight.data ** 2).sum(-1, keepdim=True)

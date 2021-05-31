@@ -52,6 +52,7 @@ try:
         print(f'[saved][{output_information}]')
         torch.save(Recmodel.state_dict(), weight_file)
         print(f"[TOTAL TIME] {time.time() - start}")
+    Procedure.Test(dataset, Recmodel, epoch, w, world.config['multicore'])
 finally:
     if world.tensorboard:
         w.close()

@@ -47,8 +47,8 @@ class MetricLoss:
         self.lr = config['lr']
         self.opt = optim.Adam(recmodel.parameters(), lr=self.lr)
 
-    def stageOne(self, users, pos, neg):
-        loss, reg_loss = self.model.metric_loss(users, pos, neg)
+    def stageOne(self, S, num_items_per_user):
+        loss, reg_loss = self.model.metric_loss(S, num_items_per_user)
         reg_loss = reg_loss * self.weight_decay
         loss = loss.sum() + reg_loss
 
@@ -61,7 +61,7 @@ class MetricLoss:
 
         return loss.cpu().item()
 
-def UniformSample_original(dataset, neg_k=10):
+def UniformSample_original(dataset, user_idx, neg_k=10):
     """
     the original impliment of BPR Sampling in LightGCN
     :return:
@@ -70,8 +70,6 @@ def UniformSample_original(dataset, neg_k=10):
     total_start = time()
     dataset : BasicDataset
     user_num = dataset.trainDataSize
-    user_idx = np.arange(dataset.n_users)
-    np.random.shuffle(user_idx)
     allPos = dataset.allPos
 
     user_positive_items_pairs = []
@@ -92,23 +90,25 @@ def UniformSample_original(dataset, neg_k=10):
             user_positive_items_pairs.append([user, i])
         num_items_per_user.append(len(posForUser))
 
+    # get negative edges
+    num_edges = len(user_positive_items_pairs)
+    user_negative_samples = np.random.randint(0, dataset.m_items, size=(num_edges, neg_k))
+    for user_positive, negatives, i in zip(user_positive_items_pairs,
+                                           user_negative_samples,
+                                           range(num_edges)):
+        user = user_positive[0]
+        for j, neg in enumerate(negatives):
+            while neg in allPos[user]:
+                user_negative_samples[i, j] = neg = np.random.randint(0, dataset.m_items)
+
+    user_triples = np.hstack((user_positive_items_pairs, user_negative_samples))
 
 
-
-
-        negitem = np.random.randint(0, dataset.m_items, size=neg_k)
-        for j, neg in enumerate(negitem):
-            while neg in posForUser:
-                negitem[j] = neg = np.random.randint(0, dataset.m_items)
-
-        t = [user, positem]
-        t.extend(negitem)
-        S.append(t)
-
-        end = time()
-        sample_time1 += end - start
+    end = time()
+    sample_time1 += end - start
     total = time() - total_start
-    return np.array(S), [total, sample_time1, sample_time2]
+
+    return user_triples, num_items_per_user, [total, sample_time1, sample_time2]
 
 # ===================end samplers==========================
 # =====================utils====================================

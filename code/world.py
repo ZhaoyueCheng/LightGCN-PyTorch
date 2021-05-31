@@ -50,6 +50,10 @@ config['bigdata'] = False
 # metric learning config
 config['margin'] = args.margin
 
+# mul loss config
+config['alpha'] = args.alpha
+config['beta'] = args.beta
+
 GPU = torch.cuda.is_available()
 device = torch.device('cuda' if GPU else "cpu")
 CORES = multiprocessing.cpu_count() // 2
