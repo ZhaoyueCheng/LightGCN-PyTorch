@@ -256,7 +256,7 @@ class LightGCN(BasicModel):
         pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
         pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.margin)))).sum()
         
-        print('neg_total:{:.2f} pos_total:{:.2f}'.format(neg_loss, pos_loss))
+        # print('neg_total:{:.2f} pos_total:{:.2f}'.format(neg_loss, pos_loss))
 
         return neg_loss+pos_loss, reg_loss
 

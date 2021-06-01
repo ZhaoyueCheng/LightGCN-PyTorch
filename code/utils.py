@@ -15,6 +15,7 @@ from time import time
 from model import LightGCN
 from model import PairWiseModel
 from sklearn.metrics import roc_auc_score
+from multiprocessing import Process, Queue
 import random
 import os
         
@@ -61,54 +62,72 @@ class MetricLoss:
 
         return loss.cpu().item()
 
-def UniformSample_original(dataset, user_idx, neg_k=10):
+class WarpSampler(object):
+    """
+    A generator that, in parallel, generates tuples: user-positive-item pairs, negative-items
+    of the shapes (Batch Size, 2) and (Batch Size, N_Negative)
+    """
+
+    def __init__(self, dataset, batch_size=1000, neg_k=5, n_workers=5):
+        self.result_queue = Queue(maxsize=n_workers * 2)
+        self.processors = []
+        for i in range(n_workers):
+            self.processors.append(
+                Process(target=UniformSample_original, args=(dataset.allPos,
+                                                            dataset.n_user,
+                                                            dataset.m_item,
+                                                            batch_size,
+                                                            neg_k,
+                                                            self.result_queue)))
+            self.processors[-1].start()
+
+    def next_batch(self):
+        return self.result_queue.get()
+
+    def close(self):
+        for p in self.processors:  # type: Process
+            p.terminate()
+            p.join()
+
+def UniformSample_original(allPos, num_users, num_items, batch_size, neg_k, result_queue):
     """
     the original impliment of BPR Sampling in LightGCN
     :return:
         np.array
     """
-    total_start = time()
-    dataset : BasicDataset
-    user_num = dataset.trainDataSize
-    allPos = dataset.allPos
 
-    user_positive_items_pairs = []
-    num_items_per_user = []
+    user_idx = np.arange(num_users)
 
-    S = []
-    sample_time1 = 0.
-    sample_time2 = 0.
-    for user in user_idx:
-        start = time()
-        posForUser = allPos[user]
-        if len(posForUser) == 0:
-            continue
-        sample_time2 += time() - start
+    while True:
+        np.random.shuffle(user_idx)
+        for k in range(int(num_users / batch_size)):
 
-        # get positive edges
-        for i in posForUser:
-            user_positive_items_pairs.append([user, i])
-        num_items_per_user.append(len(posForUser))
+            user_positive_items_pairs = []
+            num_items_per_user = []
 
-    # get negative edges
-    num_edges = len(user_positive_items_pairs)
-    user_negative_samples = np.random.randint(0, dataset.m_items, size=(num_edges, neg_k))
-    for user_positive, negatives, i in zip(user_positive_items_pairs,
+            # get positive edges
+            for user in user_idx[k * batch_size: (k + 1) * batch_size]:
+                posForUser = allPos[user]
+                if len(posForUser) == 0:
+                    continue
+
+                for i in posForUser:
+                    user_positive_items_pairs.append([user, i])
+                num_items_per_user.append(len(posForUser))
+
+            # get negative edges
+            num_edges = len(user_positive_items_pairs)
+            user_negative_samples = np.random.randint(0, num_items, size=(num_edges, neg_k))
+            for user_positive, negatives, i in zip(user_positive_items_pairs,
                                            user_negative_samples,
                                            range(num_edges)):
-        user = user_positive[0]
-        for j, neg in enumerate(negatives):
-            while neg in allPos[user]:
-                user_negative_samples[i, j] = neg = np.random.randint(0, dataset.m_items)
+                user = user_positive[0]
+                for j, neg in enumerate(negatives):
+                    while neg in allPos[user]:
+                        user_negative_samples[i, j] = neg = np.random.randint(0, num_items)
 
-    user_triples = np.hstack((user_positive_items_pairs, user_negative_samples))
-
-
-    end = time()
-    sample_time1 += end - start
-    total = time() - total_start
-
-    return user_triples, num_items_per_user, [total, sample_time1, sample_time2]
+            user_triples = np.hstack((user_positive_items_pairs, user_negative_samples))
+            result_queue.put((user_triples, num_items_per_user))
 
 # ===================end samplers==========================
 # =====================utils====================================

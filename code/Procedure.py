@@ -22,12 +22,10 @@ from sklearn.metrics import roc_auc_score
 CORES = multiprocessing.cpu_count() // 2
 
 
-def Metric_train_original(dataset, recommend_model, loss_class, epoch, neg_k=10, w=None):
+def Metric_train_original(dataset, recommend_model, loss_class, epoch, sampler, neg_k=10, w=None):
     Recmodel = recommend_model
     Recmodel.train()
     metric: utils.MetricLoss = loss_class
-    user_idx = np.arange(dataset.n_users)
-    np.random.shuffle(user_idx)
     batch_size = world.config['bpr_batch_size']
     
     # users = torch.Tensor(S[:, 0]).long()
@@ -38,13 +36,15 @@ def Metric_train_original(dataset, recommend_model, loss_class, epoch, neg_k=10,
     # posItems = posItems.to(world.device)
     # negItems = negItems.to(world.device)
     # users, posItems, negItems = utils.shuffle(users,  posItems, negItems)
-    total_batch = len(user_idx) // batch_size
+    total_batch = dataset.n_users // batch_size
     aver_loss = 0.
     for k in range(total_batch):
-        S, num_items_per_user, sam_time = utils.UniformSample_original(dataset, 
-                                                user_idx[k * batch_size: (k + 1) * batch_size], 
-                                                neg_k=neg_k)
-        # print(f"BPR[sample time][{sam_time[0]:.1f}={sam_time[1]:.2f}+{sam_time[2]:.2f}]")
+        samples = sampler.next_batch()
+        S = samples[0]
+        num_items_per_user = samples[1]
+        # S, num_items_per_user = utils.UniformSample_original(dataset, 
+        #                                 user_idx[k * batch_size: (k + 1) * batch_size], 
+        #                                 neg_k=neg_k)
         cri = metric.stageOne(S, num_items_per_user)
         aver_loss += cri
         if world.tensorboard:

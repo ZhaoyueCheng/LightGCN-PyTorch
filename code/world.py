@@ -49,6 +49,7 @@ config['bigdata'] = False
 
 # metric learning config
 config['margin'] = args.margin
+config['num_neg'] = args.num_neg
 
 # mul loss config
 config['alpha'] = args.alpha
@@ -65,9 +66,6 @@ model_name = args.model
 #     raise NotImplementedError(f"Haven't supported {dataset} yet!, try {all_dataset}")
 if model_name not in all_models:
     raise NotImplementedError(f"Haven't supported {model_name} yet!, try {all_models}")
-
-
-
 
 TRAIN_epochs = args.epochs
 LOAD = args.load
