@@ -136,7 +136,7 @@ class LightGCN(BasicModel):
             graph = self.__dropout_x(self.Graph, keep_prob)
         return graph
     
-    def computer(self):
+    def computer(self, print_norm=False):
         """
         propagate methods for lightGCN
         """       
@@ -144,6 +144,10 @@ class LightGCN(BasicModel):
         items_emb = self.embedding_item.weight
         all_emb = torch.cat([users_emb, items_emb])
         #   torch.split(all_emb , [self.num_users, self.num_items])
+
+        if print_norm:
+            print("Norm at 0th layer:", (all_emb**2).sum(1).mean().data)
+
         embs = [all_emb]
         if self.config['dropout']:
             if self.training:
@@ -169,6 +173,10 @@ class LightGCN(BasicModel):
         light_out = torch.mean(embs, dim=1)
         # light_out = torch.sum(embs, dim=1)
         # light_out = embs.view(embs.shape[0], -1)
+
+        if print_norm:
+            print("Norm at final layer:", (light_out**2).sum(1).mean().data)
+
         users, items = torch.split(light_out, [self.num_users, self.num_items])
         return users, items
     
