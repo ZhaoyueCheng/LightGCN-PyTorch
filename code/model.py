@@ -146,7 +146,8 @@ class LightGCN(BasicModel):
         #   torch.split(all_emb , [self.num_users, self.num_items])
 
         if print_norm:
-            print("Norm at 0th layer:", (all_emb**2).sum(1).mean().data)
+            print("Norm at 0th layer:", (all_emb**2).sum(1).mean().item())
+            print(all_emb.max().item())
 
         embs = [all_emb]
         if self.config['dropout']:
@@ -170,12 +171,12 @@ class LightGCN(BasicModel):
             embs.append(all_emb)
         embs = torch.stack(embs, dim=1)
         #print(embs.size())
-        light_out = torch.mean(embs, dim=1)
-        # light_out = torch.sum(embs, dim=1)
+        # light_out = torch.mean(embs, dim=1)
+        light_out = torch.sum(embs, dim=1)
         # light_out = embs.view(embs.shape[0], -1)
 
         if print_norm:
-            print("Norm at final layer:", (light_out**2).sum(1).mean().data)
+            print("Norm at final layer:", (light_out**2).sum(1).mean().item())
 
         users, items = torch.split(light_out, [self.num_users, self.num_items])
         return users, items
@@ -254,7 +255,9 @@ class LightGCN(BasicModel):
             pos_lengths = pos_lengths.to(world.device)
         neg_idx = (distance_to_neg_items - (self.margin + pos_lengths.unsqueeze(-1))) >= 0
         distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
-        neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.margin)))).sum()
+        # neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.margin)))).sum()
+        min_dist = distance_to_neg_items.min()
+        neg_loss = 1.0 / self.beta * (torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + min_dist + self.margin))))-min_dist).sum()
 
         # positive mining using min neg length
         neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
@@ -262,9 +265,11 @@ class LightGCN(BasicModel):
             neg_length = neg_length.to(world.device)
         pos_idx = (pos_distances - (neg_length - self.margin)) <= 0
         pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
-        pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.margin)))).sum()
+        # pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.margin)))).sum()
+        max_dist = pos_distances.max()
+        pos_loss = 1.0 / self.alpha * (torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances - max_dist + self.margin))))+max_dist).sum()
         
-        # print('neg_total:{:.2f} pos_total:{:.2f}'.format(neg_loss, pos_loss))
+        # print('neg_total:{:.6f} pos_total:{:.6f}'.format(neg_loss, pos_loss))
 
         return neg_loss+pos_loss, reg_loss
 
