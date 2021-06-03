@@ -46,4 +46,5 @@ def parse_args():
     parser.add_argument('--model', type=str, default='lgn', help='rec-model, support [mf, lgn]')
     # new CML arguments
     parser.add_argument('--margin', type=float, default=0.5, help="margin for the cml loss")
+    parser.add_argument('--num_neg', type=int, default=10, help="number of negative edges")
     return parser.parse_args()

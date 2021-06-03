@@ -15,6 +15,7 @@ from time import time
 from model import LightGCN
 from model import PairWiseModel
 from sklearn.metrics import roc_auc_score
+from multiprocessing import Process, Queue
 import random
 import os
         
@@ -61,42 +62,86 @@ class MetricLoss:
 
         return loss.cpu().item()
 
-def UniformSample_original(users, dataset, neg_k=10):
+class WarpSampler(object):
+    """
+    A generator that, in parallel, generates tuples: user-positive-item pairs, negative-items
+    of the shapes (Batch Size, 2) and (Batch Size, N_Negative)
+    """
+
+    def __init__(self, dataset, batch_size=1000, neg_k=5, n_workers=5):
+        self.result_queue = Queue(maxsize=n_workers * 2)
+        self.processors = []
+        for i in range(n_workers):
+            self.processors.append(
+                Process(target=UniformSample_original, args=(dataset.allPos,
+                                                            dataset.n_user,
+                                                            dataset.m_item,
+                                                            dataset.trainDataSize,
+                                                            batch_size,
+                                                            neg_k,
+                                                            self.result_queue)))
+            self.processors[-1].start()
+
+    def next_batch(self):
+        return self.result_queue.get()
+
+    def close(self):
+        for p in self.processors:  # type: Process
+            p.terminate()
+            p.join()
+
+def UniformSample_original(allPos, num_users, num_items, user_num, batch_size, neg_k, result_queue):
     """
     the original impliment of BPR Sampling in LightGCN
     :return:
         np.array
     """
-    total_start = time()
-    dataset : BasicDataset
-    user_num = dataset.trainDataSize
-    users = np.random.randint(0, dataset.n_users, user_num)
-    allPos = dataset.allPos
-    S = []
-    sample_time1 = 0.
-    sample_time2 = 0.
-    for i, user in enumerate(users):
-        start = time()
-        posForUser = allPos[user]
-        if len(posForUser) == 0:
-            continue
-        sample_time2 += time() - start
-        posindex = np.random.randint(0, len(posForUser))
-        positem = posForUser[posindex]
+    while True:
+        users = np.random.randint(0, num_users, user_num)
+        for k in range(int(user_num / batch_size)):
 
-        negitem = np.random.randint(0, dataset.m_items, size=neg_k)
-        for j, neg in enumerate(negitem):
-            while neg in posForUser:
-                negitem[j] = neg = np.random.randint(0, dataset.m_items)
+            S = []
 
-        t = [user, positem]
-        t.extend(negitem)
-        S.append(t)
+            for i, user in enumerate(users[k * batch_size: (k + 1) * batch_size]):
+                posForUser = allPos[user]
+                if len(posForUser) == 0:
+                    continue
+                posindex = np.random.randint(0, len(posForUser))
+                positem = posForUser[posindex]
 
-        end = time()
-        sample_time1 += end - start
-    total = time() - total_start
-    return np.array(S), [total, sample_time1, sample_time2]
+                negitem = np.random.randint(0, num_items, size=neg_k)
+                for j, neg in enumerate(negitem):
+                    while neg in posForUser:
+                        negitem[j] = neg = np.random.randint(0, num_items)
+
+                t = [user, positem]
+                t.extend(negitem)
+                S.append(t)
+
+            result_queue.put(np.array(S))
+
+    # dataset : BasicDataset
+    # user_num = dataset.trainDataSize
+    # users = np.random.randint(0, dataset.n_users, user_num)
+    # allPos = dataset.allPos
+    # S = []
+    # for i, user in enumerate(users):
+    #     posForUser = allPos[user]
+    #     if len(posForUser) == 0:
+    #         continue
+    #     posindex = np.random.randint(0, len(posForUser))
+    #     positem = posForUser[posindex]
+
+    #     negitem = np.random.randint(0, dataset.m_items, size=neg_k)
+    #     for j, neg in enumerate(negitem):
+    #         while neg in posForUser:
+    #             negitem[j] = neg = np.random.randint(0, dataset.m_items)
+
+    #     t = [user, positem]
+    #     t.extend(negitem)
+    #     S.append(t)
+
+    # return np.array(S)
 
 # ===================end samplers==========================
 # =====================utils====================================

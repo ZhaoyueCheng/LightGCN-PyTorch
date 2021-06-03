@@ -49,6 +49,7 @@ config['bigdata'] = False
 
 # metric learning config
 config['margin'] = args.margin
+config['num_neg'] = args.num_neg
 
 GPU = torch.cuda.is_available()
 device = torch.device('cuda' if GPU else "cpu")

@@ -22,34 +22,40 @@ from sklearn.metrics import roc_auc_score
 CORES = multiprocessing.cpu_count() // 2
 
 
-def Metric_train_original(dataset, recommend_model, loss_class, epoch, neg_k=1, w=None):
+def Metric_train_original(dataset, recommend_model, loss_class, epoch, sampler, neg_k=10, w=None):
     Recmodel = recommend_model
     Recmodel.train()
     metric: utils.MetricLoss = loss_class
-    allusers = list(range(dataset.n_users))
-    S, sam_time = utils.UniformSample_original(allusers, dataset, neg_k=neg_k)
-    print(f"BPR[sample time][{sam_time[0]:.1f}={sam_time[1]:.2f}+{sam_time[2]:.2f}]")
-    users = torch.Tensor(S[:, 0]).long()
-    posItems = torch.Tensor(S[:, 1]).long()
-    negItems = torch.Tensor(S[:, 2:]).long()
+    batch_size = world.config['bpr_batch_size']
 
-    users = users.to(world.device)
-    posItems = posItems.to(world.device)
-    negItems = negItems.to(world.device)
-    users, posItems, negItems = utils.shuffle(users,  posItems, negItems)
-    total_batch = len(users) // world.config['bpr_batch_size'] + 1
+    # allusers = list(range(dataset.n_users))
+    # S, sam_time = utils.UniformSample_original(allusers, dataset, neg_k=neg_k)
+    # print(f"BPR[sample time][{sam_time[0]:.1f}={sam_time[1]:.2f}+{sam_time[2]:.2f}]")
+    # users = torch.Tensor(S[:, 0]).long()
+    # posItems = torch.Tensor(S[:, 1]).long()
+    # negItems = torch.Tensor(S[:, 2:]).long()
+
+    # users = users.to(world.device)
+    # posItems = posItems.to(world.device)
+    # negItems = negItems.to(world.device)
+    # users, posItems, negItems = utils.shuffle(users,  posItems, negItems)
+    total_batch = dataset.trainDataSize // batch_size
     aver_loss = 0.
-    for (batch_i,
-         (batch_users,
-          batch_pos,
-          batch_neg)) in enumerate(utils.minibatch(users,
-                                                   posItems,
-                                                   negItems,
-                                                   batch_size=world.config['bpr_batch_size'])):
-        cri = metric.stageOne(batch_users, batch_pos, batch_neg)
+    for k in range(total_batch):
+        S = sampler.next_batch()
+
+        users = torch.Tensor(S[:, 0]).long()
+        posItems = torch.Tensor(S[:, 1]).long()
+        negItems = torch.Tensor(S[:, 2:]).long()
+
+        users = users.to(world.device)
+        posItems = posItems.to(world.device)
+        negItems = negItems.to(world.device)
+
+        cri = metric.stageOne(users, posItems, negItems)
         aver_loss += cri
         if world.tensorboard:
-            w.add_scalar(f'BPRLoss/BPR', cri, epoch * int(len(users) / world.config['bpr_batch_size']) + batch_i)
+            w.add_scalar(f'BPRLoss/BPR', cri, epoch * int(len(users) / world.config['bpr_batch_size']) + k)
     aver_loss = aver_loss / total_batch
     return f"[BPR[aver loss{aver_loss:.3e}]"
     
