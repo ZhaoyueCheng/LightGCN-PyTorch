@@ -55,6 +55,7 @@ if __name__ == '__main__':
             print(f'[saved][{output_information}]')
             torch.save(Recmodel.state_dict(), weight_file)
             print(f"[TOTAL TIME] {time.time() - start}")
+        Procedure.Test(dataset, Recmodel, epoch, w, world.config['multicore'])
     finally:
         sampler.close()
         if world.tensorboard:
