@@ -45,22 +45,29 @@ class MetricLoss:
                  config: dict):
         self.model = recmodel
         self.weight_decay = config['decay']
+        self.use_clip_norm = config['use_clip_norm']
+        self.clip_norm = config['clip_norm']
+        self.use_fro_norm = config['use_fro_norm']
+        self.fro_norm = config['fro_norm']
         self.lr = config['lr']
         self.opt = optim.Adam(recmodel.parameters(), lr=self.lr)
 
     def stageOne(self, S, num_items_per_user):
-        loss, reg_loss = self.model.metric_loss(S, num_items_per_user)
+        neg_loss, pos_loss, reg_loss = self.model.metric_loss(S, num_items_per_user)
         reg_loss = reg_loss * self.weight_decay
-        loss = loss.sum() + reg_loss
+        loss = neg_loss + pos_loss + reg_loss
 
         self.opt.zero_grad()
         loss.backward()
         self.opt.step()
 
-        # self.model.clip_norm_op()
-        # self.model.normalize_op()
+        if self.use_clip_norm:
+            self.model.clip_norm_op(self.clip_norm)
 
-        return loss.cpu().item()
+        if self.use_fro_norm:
+            self.model.normalize_fro(self.fro_norm)
+
+        return neg_loss.cpu().item(), pos_loss.cpu().item(), reg_loss.cpu().item()
 
 class WarpSampler(object):
     """

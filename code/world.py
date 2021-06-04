@@ -42,10 +42,13 @@ config['A_n_fold'] = args.a_fold
 config['test_u_batch_size'] = args.testbatch
 config['multicore'] = args.multicore
 config['lr'] = args.lr
-config['decay'] = args.decay
 config['pretrain'] = args.pretrain
 config['A_split'] = False
 config['bigdata'] = False
+config['comb_method'] = args.comb_method
+
+# metric config
+config['dist_method'] = args.dist_method
 
 # metric learning config
 config['margin'] = args.margin
@@ -54,6 +57,14 @@ config['num_neg'] = args.num_neg
 # mul loss config
 config['alpha'] = args.alpha
 config['beta'] = args.beta
+config['thresh'] = args.thresh
+
+# norm config
+config['decay'] = args.decay
+config['use_clip_norm'] = args.use_clip_norm
+config['clip_norm'] = args.clip_norm
+config['use_fro_norm'] = args.use_fro_norm
+config['fro_norm'] = args.fro_norm
 
 GPU = torch.cuda.is_available()
 device = torch.device('cuda' if GPU else "cpu")

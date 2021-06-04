@@ -37,7 +37,9 @@ def Metric_train_original(dataset, recommend_model, loss_class, epoch, sampler, 
     # negItems = negItems.to(world.device)
     # users, posItems, negItems = utils.shuffle(users,  posItems, negItems)
     total_batch = dataset.n_users // batch_size
-    aver_loss = 0.
+    aver_neg_loss = 0.
+    aver_pos_loss = 0.
+    aver_reg_loss = 0.
     for k in range(total_batch):
         samples = sampler.next_batch()
         S = samples[0]
@@ -45,12 +47,18 @@ def Metric_train_original(dataset, recommend_model, loss_class, epoch, sampler, 
         # S, num_items_per_user = utils.UniformSample_original(dataset, 
         #                                 user_idx[k * batch_size: (k + 1) * batch_size], 
         #                                 neg_k=neg_k)
-        cri = metric.stageOne(S, num_items_per_user)
-        aver_loss += cri
+        neg_loss, pos_loss, reg_loss = metric.stageOne(S, num_items_per_user)
+        aver_neg_loss += neg_loss
+        aver_pos_loss += pos_loss
+        aver_reg_loss += reg_loss
         if world.tensorboard:
-            w.add_scalar(f'BPRLoss/BPR', cri, epoch * total_batch + k)
-    aver_loss = aver_loss / total_batch
-    return f"[BPR[aver loss{aver_loss:.3e}]"
+            w.add_scalar(f'BPRNegLoss/BPR', neg_loss, epoch * total_batch + k)
+            w.add_scalar(f'BPRPosLoss/BPR', pos_loss, epoch * total_batch + k)
+            w.add_scalar(f'BPRRegLoss/BPR', reg_loss, epoch * total_batch + k)
+    aver_neg_loss = aver_neg_loss / total_batch
+    aver_pos_loss = aver_pos_loss / total_batch
+    aver_reg_loss = aver_reg_loss / total_batch
+    return f"[aver neg loss{aver_neg_loss:.3e}, aver pos loss{aver_pos_loss:.3e}, aver reg loss{aver_reg_loss:.3e}]"
     
     
 def test_one_batch(X):
@@ -70,9 +78,13 @@ def test_one_batch(X):
             
 def Test(dataset, Recmodel, epoch, w=None, multicore=0):
     u_batch_size = world.config['test_u_batch_size']
+    dist_method = world.config['dist_method']
+
     dataset: utils.BasicDataset
     testDict: dict = dataset.testDict
     Recmodel: model.LightGCN
+    cos = torch.nn.CosineSimilarity(dim=2, eps=1e-8)
+
     # eval mode with no dropout
     Recmodel = Recmodel.eval()
     max_K = max(world.topks)
@@ -91,7 +103,6 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=0):
         rating_list = []
         groundTrue_list = []
         auc_record = []
-        # ratings = []
         total_batch = len(users) // u_batch_size + 1
         all_users, all_items = Recmodel.computer(True)
         items_emb = all_items.unsqueeze(0)
@@ -102,10 +113,13 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=0):
             batch_users_gpu = torch.Tensor(batch_users).long()
             batch_users_gpu = batch_users_gpu.to(world.device)
 
-            # rating = Recmodel.getUsersRating(batch_users_gpu)
             users_emb = all_users[batch_users_gpu.long()].unsqueeze(1)
-            rating = -torch.sum((users_emb - items_emb) ** 2, 2)
-            #rating = rating.cpu()
+
+            if dist_method == 'L2':
+                rating = -torch.sum((users_emb - items_emb) ** 2, 2)
+            elif dist_method == 'cos':
+                rating = cos(users_emb, items_emb)
+            
             exclude_index = []
             exclude_items = []
             for range_i, items in enumerate(allPos):

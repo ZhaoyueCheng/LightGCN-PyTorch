@@ -99,6 +99,9 @@ class LightGCN(BasicModel):
         self.margin = self.config['margin']
         self.alpha = self.config['alpha']
         self.beta = self.config['beta']
+        self.thresh = self.config['thresh']
+        self.comb_method = self.config['comb_method']
+        self.dist_method = self.config['dist_method']
         self.embedding_user = torch.nn.Embedding(
             num_embeddings=self.num_users, embedding_dim=self.latent_dim)
         self.embedding_item = torch.nn.Embedding(
@@ -146,7 +149,7 @@ class LightGCN(BasicModel):
         #   torch.split(all_emb , [self.num_users, self.num_items])
 
         if print_norm:
-            print("Norm at 0th layer:", (all_emb**2).sum(1).mean().item(), all_emb.max().item())
+            print("Norm at 0th layer:", (all_emb**2).sum(1).mean().item())
 
         embs = [all_emb]
         if self.config['dropout']:
@@ -169,9 +172,11 @@ class LightGCN(BasicModel):
                 all_emb = torch.sparse.mm(g_droped, all_emb)
             embs.append(all_emb)
         embs = torch.stack(embs, dim=1)
-        #print(embs.size())
-        # light_out = torch.mean(embs, dim=1)
-        light_out = torch.sum(embs, dim=1)
+
+        if self.comb_method == 'mean':
+            light_out = torch.mean(embs, dim=1)
+        elif self.comb_method == 'sum':
+            light_out = torch.sum(embs, dim=1)
         # light_out = embs.view(embs.shape[0], -1)
 
         if print_norm:
@@ -228,50 +233,80 @@ class LightGCN(BasicModel):
                               posEmb0.norm(2).pow(2) +
                               negEmb0.norm(2).pow(2)) / float(len(users))
 
-        # positive item to user distance (N)
-        pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
-        # distance to negative items (N x W)
-        distance_to_neg_items = torch.sum((users_emb.unsqueeze(-1) - neg_emb.transpose(-2, -1)) ** 2, 1)
+        if self.dist_method == 'L2':
 
-        start_idx = 0
-        pos_lengths = []
-        neg_length = []
-        for i in num_items_per_user:
+            # positive item to user distance (N)
+            pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
+            # distance to negative items (N x W)
+            distance_to_neg_items = torch.sum((users_emb.unsqueeze(-1) - neg_emb.transpose(-2, -1)) ** 2, 1)
 
-            max_pos_length = pos_distances[start_idx: start_idx+i].max()
-            pos_lengths.append(max_pos_length)
-            
-            min_neg_length = distance_to_neg_items[start_idx: start_idx+i].min()
-            neg_length.append(min_neg_length)
-            
-            start_idx += i
+            start_idx = 0
+            pos_lengths = []
+            neg_length = []
+            for i in num_items_per_user:
 
-        num_items_per_user = torch.LongTensor(num_items_per_user)
+                max_pos_length = pos_distances[start_idx: start_idx+i].max()
+                pos_lengths.append(max_pos_length)
+                
+                min_neg_length = distance_to_neg_items[start_idx: start_idx+i].min()
+                neg_length.append(min_neg_length)
+                
+                start_idx += i
 
-         # negative mining using max pos length
-        pos_lengths = torch.repeat_interleave(torch.tensor(pos_lengths), num_items_per_user)
-        if torch.cuda.is_available():
+            num_items_per_user = torch.LongTensor(num_items_per_user)
+
+            # negative mining using max pos length
+            pos_lengths = torch.repeat_interleave(torch.tensor(pos_lengths), num_items_per_user)
             pos_lengths = pos_lengths.to(world.device)
-        neg_idx = (distance_to_neg_items - (self.margin + pos_lengths.unsqueeze(-1))) >= 0
-        distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
-        neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.margin)))).sum()
-        # min_dist = distance_to_neg_items.min()
-        # neg_loss = 1.0 / self.beta * (torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + min_dist + self.margin))))-min_dist).sum()
+            neg_idx = (distance_to_neg_items - (self.margin + pos_lengths.unsqueeze(-1))) >= 0
+            distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
+            neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.thresh)))).sum()
 
-        # positive mining using min neg length
-        neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
-        if torch.cuda.is_available():
+            # positive mining using min neg length
+            neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
             neg_length = neg_length.to(world.device)
-        pos_idx = (pos_distances - (neg_length - self.margin)) <= 0
-        pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
-        pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.margin)))).sum()
-        # max_dist = pos_distances.max()
-        # pos_loss = 1.0 / self.alpha * (torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances - max_dist + self.margin))))+max_dist).sum()
-        
-        # print('neg_total:{:.6f} pos_total:{:.6f}'.format(neg_loss, pos_loss))
+            pos_idx = (pos_distances - (neg_length - self.margin)) <= 0
+            pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
+            pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.thresh)))).sum()
 
-        return neg_loss+pos_loss, reg_loss
+        elif self.dist_method == 'cos':
+            cos = torch.nn.CosineSimilarity(dim=1, eps=1e-8)
 
+            # positive item to user distance (N)
+            pos_distances = cos(users_emb, pos_emb)
+            # distance to negative items (N x W)
+            distance_to_neg_items = cos(users_emb.unsqueeze(-1), neg_emb.transpose(-2, -1))
+
+            start_idx = 0
+            pos_lengths = []
+            neg_length = []
+            for i in num_items_per_user:
+
+                min_pos_length = pos_distances[start_idx: start_idx+i].min()
+                pos_lengths.append(min_pos_length)
+                
+                max_neg_length = distance_to_neg_items[start_idx: start_idx+i].max()
+                neg_length.append(max_neg_length)
+                
+                start_idx += i
+
+            num_items_per_user = torch.LongTensor(num_items_per_user)
+
+            # negative mining using max pos length
+            pos_lengths = torch.repeat_interleave(torch.tensor(pos_lengths), num_items_per_user)
+            pos_lengths = pos_lengths.to(world.device)
+            neg_idx = (distance_to_neg_items + self.margin - pos_lengths.unsqueeze(-1)) < 0
+            distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, -float('inf'), 0.)
+            neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(self.beta * (distance_to_neg_items - self.thresh)))).sum()
+
+            # positive mining using min neg length
+            neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
+            neg_length = neg_length.to(world.device)
+            pos_idx = (pos_distances - self.margin - neg_length) > 0
+            pos_distances = pos_distances + torch.where(pos_idx, float('inf'), 0.)
+            pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(-self.alpha * (pos_distances - self.thresh)))).sum()
+
+        return neg_loss, pos_loss, reg_loss
 
     # def metric_loss(self, users, pos, neg):
     #     (users_emb, pos_emb, neg_emb,
@@ -294,7 +329,7 @@ class LightGCN(BasicModel):
 
     #     return loss, reg_loss
 
-    def clip_norm_op(self, clip_norm=1):
+    def clip_norm_op(self, clip_norm=1.0):
         norm_user = (self.embedding_user.weight.data ** 2).sum(-1, keepdim=True)
         self.embedding_user.weight.data = torch.where(norm_user < clip_norm ** 2,
                                                       self.embedding_user.weight.data,
@@ -305,13 +340,14 @@ class LightGCN(BasicModel):
                                                       self.embedding_item.weight.data,
                                                       self.embedding_item.weight.data * clip_norm / (norm_item + 1e-12))
 
-        # self.embedding_user.weight.data = torch.nn.functional.normalize(self.embedding_user.weight.data, 2, -1)
-        # self.embedding_item.weight.data = torch.nn.functional.normalize(self.embedding_item.weight.data, 2, -1)
-
-    def normalize_op(self):
-        self.embedding_user.weight.data = torch.nn.functional.normalize(self.embedding_user.weight.data, 2, -1)
-        self.embedding_item.weight.data = torch.nn.functional.normalize(self.embedding_item.weight.data, 2, -1)
+    def normalize_op(self, op_norm=1.0):
+        self.embedding_user.weight.data = torch.nn.functional.normalize(self.embedding_user.weight.data, 2, -1, op_norm)
+        self.embedding_item.weight.data = torch.nn.functional.normalize(self.embedding_item.weight.data, 2, -1, op_norm)
        
+    def normalize_fro(self, fro_norm=1.0):
+        self.embedding_user.weight.data /= self.embedding_user.weight.data.norm('fro', dim=-1).unsqueeze(-1)
+        self.embedding_item.weight.data /= self.embedding_item.weight.data.norm('fro', dim=-1).unsqueeze(-1)
+
     # def forward(self, users, items):
     #     # compute embedding
     #     all_users, all_items = self.computer()
