@@ -8,6 +8,16 @@ if world.dataset in ['gowalla', 'yelp2018', 'amazon-book']:
     dataset = dataloader.Loader(path="../data/"+world.dataset)
 elif world.dataset == 'lastfm':
     dataset = dataloader.LastFM()
+elif world.dataset in ['amazon-music', 'amazon-grocery', 'amazon-book20']:
+    dataset = dataloader.AmazonLoader(path="../data/"+world.dataset)
+elif world.dataset == 'ml':
+    dataset = dataloader.MlLoader(path="../data/ml/")
+elif world.dataset in ['TAFA-cd', 'TAFA-grocery', 'TAFA-digital-music']:
+    dataset = dataloader.TAFALoader(path="../data/"+world.dataset)
+else:
+    dataset = dataloader.AmazonLoader(path="../data/" + world.dataset)
+
+
 
 print('===========config================')
 pprint(world.config)

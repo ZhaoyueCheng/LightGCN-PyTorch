@@ -12,5 +12,5 @@ checkpoints/
 runs/
 __pycache__/
 *.npy
-*.so
-.rendered
+
+data/amazon-music/

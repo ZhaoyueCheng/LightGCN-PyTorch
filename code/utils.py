@@ -15,91 +15,113 @@ from time import time
 from model import LightGCN
 from model import PairWiseModel
 from sklearn.metrics import roc_auc_score
+from multiprocessing import Process, Queue
 import random
 import os
-try:
-    from cppimport import imp_from_filepath
-    from os.path import join, dirname
-    path = join(dirname(__file__), "sources/sampling.cpp")
-    sampling = imp_from_filepath(path)
-    sampling.seed(world.seed)
-    sample_ext = True
-except:
-    world.cprint("Cpp extension not loaded")
-    sample_ext = False
-
-
+        
 class BPRLoss:
-    def __init__(self,
-                 recmodel : PairWiseModel,
+    def __init__(self, 
+                 recmodel : PairWiseModel, 
                  config : dict):
         self.model = recmodel
         self.weight_decay = config['decay']
         self.lr = config['lr']
         self.opt = optim.Adam(recmodel.parameters(), lr=self.lr)
-
+        
     def stageOne(self, users, pos, neg):
         loss, reg_loss = self.model.bpr_loss(users, pos, neg)
         reg_loss = reg_loss*self.weight_decay
         loss = loss + reg_loss
-
+        
         self.opt.zero_grad()
         loss.backward()
         self.opt.step()
-
+        
         return loss.cpu().item()
 
+class WarpSampler(object):
+    """
+    A generator that, in parallel, generates tuples: user-positive-item pairs, negative-items
+    of the shapes (Batch Size, 2) and (Batch Size, N_Negative)
+    """
 
-def UniformSample_original(dataset, neg_ratio = 1):
-    dataset : BasicDataset
-    allPos = dataset.allPos
-    start = time()
-    if sample_ext:
-        S = sampling.sample_negative(dataset.n_users, dataset.m_items,
-                                     dataset.trainDataSize, allPos, neg_ratio)
-    else:
-        S = UniformSample_original_python(dataset)
-    return S
+    def __init__(self, dataset, batch_size=1000, n_workers=5):
+        self.result_queue = Queue(maxsize=n_workers * 2)
+        self.processors = []
+        for i in range(n_workers):
+            self.processors.append(
+                Process(target=UniformSample_original, args=(dataset.allPos,
+                                                            dataset.n_user,
+                                                            dataset.m_item,
+                                                            dataset.trainDataSize,
+                                                            batch_size,
+                                                            self.result_queue)))
+            self.processors[-1].start()
 
-def UniformSample_original_python(dataset):
+    def next_batch(self):
+        return self.result_queue.get()
+
+    def close(self):
+        for p in self.processors:  # type: Process
+            p.terminate()
+            p.join()
+
+def UniformSample_original(allPos, num_users, num_items, user_num, batch_size, result_queue):
     """
     the original impliment of BPR Sampling in LightGCN
     :return:
         np.array
     """
-    total_start = time()
-    dataset : BasicDataset
-    user_num = dataset.trainDataSize
-    users = np.random.randint(0, dataset.n_users, user_num)
-    allPos = dataset.allPos
-    S = []
-    sample_time1 = 0.
-    sample_time2 = 0.
-    for i, user in enumerate(users):
-        start = time()
-        posForUser = allPos[user]
-        if len(posForUser) == 0:
-            continue
-        sample_time2 += time() - start
-        posindex = np.random.randint(0, len(posForUser))
-        positem = posForUser[posindex]
-        while True:
-            negitem = np.random.randint(0, dataset.m_items)
-            if negitem in posForUser:
-                continue
-            else:
-                break
-        S.append([user, positem, negitem])
-        end = time()
-        sample_time1 += end - start
-    total = time() - total_start
-    return np.array(S)
+
+    while True:
+        users = np.random.randint(0, num_users, user_num)
+        for k in range(int(user_num / batch_size)):
+
+            S = []
+
+            for i, user in enumerate(users[k * batch_size: (k + 1) * batch_size]):
+                posForUser = allPos[user]
+                if len(posForUser) == 0:
+                    continue
+                posindex = np.random.randint(0, len(posForUser))
+                positem = posForUser[posindex]
+                while True:
+                    negitem = np.random.randint(0, num_items)
+                    if negitem in posForUser:
+                        continue
+                    else:
+                        break
+                S.append([user, positem, negitem])
+
+            result_queue.put(np.array(S))
+
+    # dataset : BasicDataset
+    # user_num = dataset.trainDataSize
+    # users = np.random.randint(0, dataset.n_users, user_num)
+    # allPos = dataset.allPos
+    # S = []
+    # for i, user in enumerate(users):
+    #     posForUser = allPos[user]
+    #     if len(posForUser) == 0:
+    #         continue
+    #     posindex = np.random.randint(0, len(posForUser))
+    #     positem = posForUser[posindex]
+    #     while True:
+    #         negitem = np.random.randint(0, dataset.m_items)
+    #         if negitem in posForUser:
+    #             continue
+    #         else:
+    #             break
+    #     S.append([user, positem, negitem])
+    #     end = time()
+    #     sample_time1 += end - start
+    # return np.array(S)
 
 # ===================end samplers==========================
 # =====================utils====================================
 
 def set_seed(seed):
-    np.random.seed(seed)
+    np.random.seed(seed)   
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
@@ -146,69 +168,6 @@ def shuffle(*arrays, **kwargs):
     else:
         return result
 
-
-class timer:
-    """
-    Time context manager for code block
-        with timer():
-            do something
-        timer.get()
-    """
-    from time import time
-    TAPE = [-1]  # global time record
-    NAMED_TAPE = {}
-
-    @staticmethod
-    def get():
-        if len(timer.TAPE) > 1:
-            return timer.TAPE.pop()
-        else:
-            return -1
-
-    @staticmethod
-    def dict(select_keys=None):
-        hint = "|"
-        if select_keys is None:
-            for key, value in timer.NAMED_TAPE.items():
-                hint = hint + f"{key}:{value:.2f}|"
-        else:
-            for key in select_keys:
-                value = timer.NAMED_TAPE[key]
-                hint = hint + f"{key}:{value:.2f}|"
-        return hint
-
-    @staticmethod
-    def zero(select_keys=None):
-        if select_keys is None:
-            for key, value in timer.NAMED_TAPE.items():
-                timer.NAMED_TAPE[key] = 0
-        else:
-            for key in select_keys:
-                timer.NAMED_TAPE[key] = 0
-
-    def __init__(self, tape=None, **kwargs):
-        if kwargs.get('name'):
-            timer.NAMED_TAPE[kwargs['name']] = timer.NAMED_TAPE[
-                kwargs['name']] if timer.NAMED_TAPE.get(kwargs['name']) else 0.
-            self.named = kwargs['name']
-            if kwargs.get("group"):
-                #TODO: add group function
-                pass
-        else:
-            self.named = False
-            self.tape = tape or timer.TAPE
-
-    def __enter__(self):
-        self.start = timer.time()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.named:
-            timer.NAMED_TAPE[self.named] += timer.time() - self.start
-        else:
-            self.tape.append(timer.time() - self.start)
-
-
 # ====================Metrics==============================
 # =========================================================
 def RecallPrecision_ATk(test_data, r, k):
@@ -242,7 +201,7 @@ def NDCGatK_r(test_data,r,k):
     """
     assert len(r) == len(test_data)
     pred_data = r[:, :k]
-
+    
     test_matrix = np.zeros((len(pred_data), k))
     for i, items in enumerate(test_data):
         length = k if k <= len(items) else len(items)
