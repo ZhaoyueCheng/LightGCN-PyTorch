@@ -28,16 +28,16 @@ class BPRLoss:
         self.lr = config['lr']
         self.opt = optim.Adam(recmodel.parameters(), lr=self.lr)
         
-    def stageOne(self, users, pos, neg):
-        loss, reg_loss = self.model.bpr_loss(users, pos, neg)
+    def stageOne(self, users, pos, neg, num_items_per_user):
+        neg_loss, pos_loss, reg_loss = self.model.bpr_loss(users, pos, neg, num_items_per_user)
         reg_loss = reg_loss*self.weight_decay
-        loss = loss + reg_loss
+        loss = neg_loss + pos_loss + reg_loss
         
         self.opt.zero_grad()
         loss.backward()
         self.opt.step()
         
-        return loss.cpu().item()
+        return neg_loss.cpu().item(), pos_loss.cpu().item(), reg_loss.cpu().item()
 
 class WarpSampler(object):
     """
@@ -45,7 +45,7 @@ class WarpSampler(object):
     of the shapes (Batch Size, 2) and (Batch Size, N_Negative)
     """
 
-    def __init__(self, dataset, batch_size=1000, n_workers=5):
+    def __init__(self, dataset, batch_size=1000, neg_k=5, n_workers=5):
         self.result_queue = Queue(maxsize=n_workers * 2)
         self.processors = []
         for i in range(n_workers):
@@ -53,8 +53,8 @@ class WarpSampler(object):
                 Process(target=UniformSample_original, args=(dataset.allPos,
                                                             dataset.n_user,
                                                             dataset.m_item,
-                                                            dataset.trainDataSize,
                                                             batch_size,
+                                                            neg_k,
                                                             self.result_queue)))
             self.processors[-1].start()
 
@@ -66,34 +66,45 @@ class WarpSampler(object):
             p.terminate()
             p.join()
 
-def UniformSample_original(allPos, num_users, num_items, user_num, batch_size, result_queue):
+def UniformSample_original(allPos, num_users, num_items, batch_size, neg_k, result_queue):
     """
     the original impliment of BPR Sampling in LightGCN
     :return:
         np.array
     """
 
+    user_idx = np.arange(num_users)
+
     while True:
-        users = np.random.randint(0, num_users, user_num)
-        for k in range(int(user_num / batch_size)):
+        np.random.shuffle(user_idx)
+        for k in range(int(num_users / batch_size)):
 
-            S = []
+            user_positive_items_pairs = []
+            num_items_per_user = []
 
-            for i, user in enumerate(users[k * batch_size: (k + 1) * batch_size]):
+            # get positive edges
+            for user in user_idx[k * batch_size: (k + 1) * batch_size]:
                 posForUser = allPos[user]
                 if len(posForUser) == 0:
                     continue
-                posindex = np.random.randint(0, len(posForUser))
-                positem = posForUser[posindex]
-                while True:
-                    negitem = np.random.randint(0, num_items)
-                    if negitem in posForUser:
-                        continue
-                    else:
-                        break
-                S.append([user, positem, negitem])
 
-            result_queue.put(np.array(S))
+                for i in posForUser:
+                    user_positive_items_pairs.append([user, i])
+                num_items_per_user.append(len(posForUser))
+
+            # get negative edges
+            num_edges = len(user_positive_items_pairs)
+            user_negative_samples = np.random.randint(0, num_items, size=(num_edges, neg_k))
+            for user_positive, negatives, i in zip(user_positive_items_pairs,
+                                           user_negative_samples,
+                                           range(num_edges)):
+                user = user_positive[0]
+                for j, neg in enumerate(negatives):
+                    while neg in allPos[user]:
+                        user_negative_samples[i, j] = neg = np.random.randint(0, num_items)
+
+            user_triples = np.hstack((user_positive_items_pairs, user_negative_samples))
+            result_queue.put((user_triples, num_items_per_user))
 
     # dataset : BasicDataset
     # user_num = dataset.trainDataSize

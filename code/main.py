@@ -28,7 +28,6 @@ if __name__ == '__main__':
             world.cprint(f"loaded model weights from {weight_file}") 
         except FileNotFoundError:
             print(f"{weight_file} not exists, start from beginning")
-    Neg_k = 1
 
     # init tensorboard
     if world.tensorboard:
@@ -40,7 +39,7 @@ if __name__ == '__main__':
         world.cprint("not enable tensorflowboard")
 
     # init sampler
-    sampler = utils.WarpSampler(dataset, world.config['bpr_batch_size'])
+    sampler = utils.WarpSampler(dataset, world.config['bpr_batch_size'], world.config['num_neg'])
         
     try:
         for epoch in range(world.TRAIN_epochs):
@@ -50,7 +49,7 @@ if __name__ == '__main__':
             if epoch % 10 == 0:
                 cprint("[TEST]")
                 Procedure.Test(dataset, Recmodel, epoch, w, world.config['multicore'])
-            output_information = Procedure.BPR_train_original(dataset, Recmodel, bpr, epoch, sampler, neg_k=Neg_k,w=w)
+            output_information = Procedure.BPR_train_original(dataset, Recmodel, bpr, epoch, sampler, w=w)
             
             print(f'[saved][{output_information}]')
             torch.save(Recmodel.state_dict(), weight_file)

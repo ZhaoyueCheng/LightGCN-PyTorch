@@ -96,14 +96,22 @@ class LightGCN(BasicModel):
         self.n_layers = self.config['lightGCN_n_layers']
         self.keep_prob = self.config['keep_prob']
         self.A_split = self.config['A_split']
+        self.margin = self.config['margin']
+        self.alpha = self.config['alpha']
+        self.beta = self.config['beta']
+        self.thresh = self.config['thresh']
         self.embedding_user = torch.nn.Embedding(
             num_embeddings=self.num_users, embedding_dim=self.latent_dim)
         self.embedding_item = torch.nn.Embedding(
             num_embeddings=self.num_items, embedding_dim=self.latent_dim)
         if self.config['pretrain'] == 0:
-            nn.init.xavier_uniform_(self.embedding_user.weight, gain=1)
-            nn.init.xavier_uniform_(self.embedding_item.weight, gain=1)
-            print('use xavier initilizer')
+#             nn.init.xavier_uniform_(self.embedding_user.weight, gain=1)
+#             nn.init.xavier_uniform_(self.embedding_item.weight, gain=1)
+#             print('use xavier initilizer')
+# random normal init seems to be a better choice when lightGCN actually don't use any non-linear activation function
+            nn.init.normal_(self.embedding_user.weight, std=0.1)
+            nn.init.normal_(self.embedding_item.weight, std=0.1)
+            world.cprint('use NORMAL distribution initilizer')
         else:
             self.embedding_user.weight.data.copy_(torch.from_numpy(self.config['user_emb']))
             self.embedding_item.weight.data.copy_(torch.from_numpy(self.config['item_emb']))
@@ -184,20 +192,49 @@ class LightGCN(BasicModel):
         neg_emb_ego = self.embedding_item(neg_items)
         return users_emb, pos_emb, neg_emb, users_emb_ego, pos_emb_ego, neg_emb_ego
     
-    def bpr_loss(self, users, pos, neg):
+    def bpr_loss(self, users, pos, neg, num_items_per_user):
+
         (users_emb, pos_emb, neg_emb, 
         userEmb0,  posEmb0, negEmb0) = self.getEmbedding(users.long(), pos.long(), neg.long())
         reg_loss = (1/2)*(userEmb0.norm(2).pow(2) + 
                          posEmb0.norm(2).pow(2)  +
                          negEmb0.norm(2).pow(2))/float(len(users))
+
         pos_scores = torch.mul(users_emb, pos_emb)
         pos_scores = torch.sum(pos_scores, dim=1)
-        neg_scores = torch.mul(users_emb, neg_emb)
-        neg_scores = torch.sum(neg_scores, dim=1)
-        
-        loss = torch.mean(torch.nn.functional.softplus(neg_scores - pos_scores))
-        
-        return loss, reg_loss
+        neg_scores = torch.mul(users_emb.unsqueeze(1), neg_emb)
+        neg_scores = torch.sum(neg_scores, dim=2)
+
+        start_idx = 0
+        min_pos = []
+        max_neg = []
+        for i in num_items_per_user:
+
+            min_pos_score = pos_scores[start_idx: start_idx+i].min()
+            min_pos.append(min_pos_score)
+            
+            max_neg_score = neg_scores[start_idx: start_idx+i].max()
+            max_neg.append(max_neg_score)
+            
+            start_idx += i
+
+        num_items_per_user = torch.LongTensor(num_items_per_user)
+
+        # negative mining using min pos score
+        min_pos = torch.repeat_interleave(torch.tensor(min_pos), num_items_per_user)
+        min_pos = min_pos.to(world.device)
+        neg_idx = (neg_scores + self.margin - min_pos.unsqueeze(-1)) < 0
+        neg_scores = neg_scores + torch.where(neg_idx, -float('inf'), 0.)
+        neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(self.beta * (neg_scores - self.thresh)))).sum()
+
+        # positive mining using min neg score
+        max_neg = torch.repeat_interleave(torch.tensor(max_neg), num_items_per_user)
+        max_neg = max_neg.to(world.device)
+        pos_idx = (pos_scores - self.margin - max_neg) > 0
+        pos_scores = pos_scores + torch.where(pos_idx, float('inf'), 0.)
+        pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(-self.alpha * (pos_scores - self.thresh)))).sum()
+
+        return neg_loss, pos_loss, reg_loss
        
     def forward(self, users, items):
         # compute embedding

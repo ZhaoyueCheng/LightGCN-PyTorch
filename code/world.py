@@ -18,7 +18,7 @@ args = parse_args()
 
 # ROOT_PATH = "/Users/gus/Desktop/light-gcn"
 # ROOT_PATH = "/home/ubuntu/LightGCN-PyTorch/"
-ROOT_PATH = "/home/joey/Documents/recsys/LightGCN-PyTorch/"
+ROOT_PATH = "/home/zhaolin/research/LightGCN-PyTorch/"
 CODE_PATH = join(ROOT_PATH, 'code')
 DATA_PATH = join(ROOT_PATH, 'data')
 BOARD_PATH = join(CODE_PATH, 'runs')
@@ -46,6 +46,15 @@ config['decay'] = args.decay
 config['pretrain'] = args.pretrain
 config['A_split'] = False
 config['bigdata'] = False
+
+# metric learning config
+config['margin'] = args.margin
+config['num_neg'] = args.num_neg
+
+# mul loss config
+config['alpha'] = args.alpha
+config['beta'] = args.beta
+config['thresh'] = args.thresh
 
 GPU = torch.cuda.is_available()
 device = torch.device('cuda' if GPU else "cpu")

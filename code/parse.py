@@ -10,9 +10,9 @@ import argparse
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Go lightGCN")
-    parser.add_argument('--bpr_batch', type=int,default=500,
+    parser.add_argument('--bpr_batch', type=int,default=1000,
                         help="the batch size for bpr loss training procedure")
-    parser.add_argument('--recdim', type=int,default=50,
+    parser.add_argument('--recdim', type=int,default=64,
                         help="the embedding size of lightGCN")
     parser.add_argument('--layer', type=int,default=3,
                         help="the layer num of lightGCN")
@@ -26,7 +26,7 @@ def parse_args():
                         help="the batch size for bpr loss training procedure")
     parser.add_argument('--a_fold', type=int,default=100,
                         help="the fold num used to split large adj matrix, like gowalla")
-    parser.add_argument('--testbatch', type=int,default=10000,
+    parser.add_argument('--testbatch', type=int,default=100,
                         help="the batch size of users for testing")
     parser.add_argument('--dataset', type=str,default='TAFA',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
@@ -44,4 +44,11 @@ def parse_args():
     # parser.add_argument('--seed', type=int, default=2020, help='random seed')
     parser.add_argument('--seed', type=int, default=1234, help='random seed')
     parser.add_argument('--model', type=str, default='lgn', help='rec-model, support [mf, lgn]')
+    # new CML arguments
+    parser.add_argument('--margin', type=float, default=1.0, help="margin for the mul loss")
+    parser.add_argument('--num_neg', type=int, default=10, help="number of negative edges")
+    # MUL-Loss arguments
+    parser.add_argument('--alpha', type=float, default=1.25, help="alpha for mul loss")
+    parser.add_argument('--beta', type=float, default=5.0, help="beta for mul loss")
+    parser.add_argument('--thresh', type=float, default=3.0, help="thresh for the mul loss")
     return parser.parse_args()

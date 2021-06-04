@@ -22,7 +22,7 @@ from sklearn.metrics import roc_auc_score
 CORES = multiprocessing.cpu_count() // 2
 
 
-def BPR_train_original(dataset, recommend_model, loss_class, epoch, sampler, neg_k=1, w=None):
+def BPR_train_original(dataset, recommend_model, loss_class, epoch, sampler, w=None):
     Recmodel = recommend_model
     Recmodel.train()
     bpr: utils.BPRLoss = loss_class
@@ -38,25 +38,36 @@ def BPR_train_original(dataset, recommend_model, loss_class, epoch, sampler, neg
     # negItems = negItems.to(world.device)
 
     # users, posItems, negItems = utils.shuffle(users,  posItems, negItems)
-    total_batch = dataset.trainDataSize // world.config['bpr_batch_size']
-    aver_loss = 0.
+    total_batch = dataset.n_users // world.config['bpr_batch_size']
+    aver_neg_loss = 0.
+    aver_pos_loss = 0.
+    aver_reg_loss = 0.
     for k in range(total_batch):
-        S = sampler.next_batch()
+        samples = sampler.next_batch()
+        S = samples[0]
+        num_items_per_user = samples[1]
 
         users = torch.Tensor(S[:, 0]).long()
         posItems = torch.Tensor(S[:, 1]).long()
-        negItems = torch.Tensor(S[:, 2]).long()
+        negItems = torch.Tensor(S[:, 2:]).long()
 
         users = users.to(world.device)
         posItems = posItems.to(world.device)
         negItems = negItems.to(world.device)
 
-        cri = bpr.stageOne(users, posItems, negItems)
-        aver_loss += cri
+        neg_loss, pos_loss, reg_loss = bpr.stageOne(users, posItems, negItems, num_items_per_user)
+        aver_neg_loss += neg_loss
+        aver_pos_loss += pos_loss
+        aver_reg_loss += reg_loss
         if world.tensorboard:
-            w.add_scalar(f'BPRLoss/BPR', cri, epoch * int(len(users) / world.config['bpr_batch_size']) + k)
-    aver_loss = aver_loss / total_batch
-    return f"[BPR[aver loss{aver_loss:.3e}]"
+            w.add_scalar(f'BPRNegLoss/BPR', neg_loss, epoch * int(len(users) / world.config['bpr_batch_size']) + k)
+            w.add_scalar(f'BPRPosLoss/BPR', pos_loss, epoch * int(len(users) / world.config['bpr_batch_size']) + k)
+            w.add_scalar(f'BPRRegLoss/BPR', reg_loss, epoch * int(len(users) / world.config['bpr_batch_size']) + k)
+
+    aver_neg_loss = aver_neg_loss / total_batch
+    aver_pos_loss = aver_pos_loss / total_batch
+    aver_reg_loss = aver_reg_loss / total_batch
+    return f"[BPR[aver neg loss{aver_neg_loss:.3e}, aver pos loss{aver_pos_loss:.3e}, aver reg loss{aver_reg_loss:.3e}]"
     
     
 def test_one_batch(X):
