@@ -62,13 +62,15 @@ def parse_args():
     parser.add_argument('--decay', type=float, default=0,
                         help="the weight decay for l2 normalizaton")
     # clip norm
-    parser.add_argument('--use_clip_norm', type=bool, default=True,
+    parser.add_argument('--use_clip_norm', dest='use_clip_norm', action='store_true',
                         help="whether we use clip_norm")
+    parser.set_defaults(use_clip_norm=False)
     parser.add_argument('--clip_norm', type=float, default=1.0,
                         help="clip_norm value")
     # keep on the surface of a unit sphere
-    parser.add_argument('--use_fro_norm', type=bool, default=False,
+    parser.add_argument('--use_fro_norm', dest='use_fro_norm', action='store_true',
                         help="whether we use fro_norm")
+    parser.set_defaults(use_fro_norm=False)
     parser.add_argument('--fro_norm', type=float, default=1.0,
                         help="fro_norm value")
 
