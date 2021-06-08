@@ -106,6 +106,8 @@ class LightGCN(BasicModel):
             num_embeddings=self.num_users, embedding_dim=self.latent_dim)
         self.embedding_item = torch.nn.Embedding(
             num_embeddings=self.num_items, embedding_dim=self.latent_dim)
+        self.layer_comb = torch.nn.parameter.Parameter(torch.ones(self.num_users+self.num_items, self.n_layers+1))
+
         if self.config['pretrain'] == 0:
             nn.init.xavier_uniform_(self.embedding_user.weight, gain=1)
             nn.init.xavier_uniform_(self.embedding_item.weight, gain=1)
@@ -149,12 +151,13 @@ class LightGCN(BasicModel):
         #   torch.split(all_emb , [self.num_users, self.num_items])
 
         if print_norm:
-            print("Norm at 0th layer:", (all_emb**2).sum(1).mean().item())
+            print("User norm at 0th layer:", (users_emb**2).sum(1).mean().item())
+            print("Item norm at 0th layer:", (items_emb**2).sum(1).mean().item())
 
         embs = [all_emb]
         if self.config['dropout']:
             if self.training:
-                print("droping")
+                # print("droping")
                 g_droped = self.__dropout(self.keep_prob)
             else:
                 g_droped = self.Graph        
@@ -177,12 +180,19 @@ class LightGCN(BasicModel):
             light_out = torch.mean(embs, dim=1)
         elif self.comb_method == 'sum':
             light_out = torch.sum(embs, dim=1)
-        # light_out = embs.view(embs.shape[0], -1)
-
-        if print_norm:
-            print("Norm at final layer:", (light_out**2).sum(1).mean().item())
+        elif self.comb_method == 'train':
+            light_out = torch.matmul(embs.transpose(-2, -1), self.layer_comb.unsqueeze(-1)).squeeze()
+        elif self.comb_method == 'final':
+            light_out = embs[:, -1, :]
 
         users, items = torch.split(light_out, [self.num_users, self.num_items])
+
+        if print_norm:
+            if self.comb_method == 'train':
+                print(self.layer_comb.mean(dim=0).data)
+            print("User norm at final layer:", (users**2).sum(1).mean().item())
+            print("Item norm at final layer:", (items**2).sum(1).mean().item())
+
         return users, items
     
     def getUsersRating(self, users):
@@ -234,7 +244,6 @@ class LightGCN(BasicModel):
                               negEmb0.norm(2).pow(2)) / float(len(users))
 
         if self.dist_method == 'L2':
-
             # positive item to user distance (N)
             pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
             # distance to negative items (N x W)
@@ -260,14 +269,16 @@ class LightGCN(BasicModel):
             pos_lengths = pos_lengths.to(world.device)
             neg_idx = (distance_to_neg_items - (self.margin + pos_lengths.unsqueeze(-1))) >= 0
             distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
-            neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.thresh)))).sum()
+            neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.thresh))))
+            # neg_loss = torch.nn.functional.relu(self.thresh + pos_lengths.unsqueeze(-1) - distance_to_neg_items).mean()
 
             # positive mining using min neg length
             neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
             neg_length = neg_length.to(world.device)
             pos_idx = (pos_distances - (neg_length - self.margin)) <= 0
             pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
-            pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.thresh)))).sum()
+            pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.thresh))))
+            # pos_loss = torch.nn.functional.relu(self.thresh + pos_distances - neg_length).mean()
 
         elif self.dist_method == 'cos':
             cos = torch.nn.CosineSimilarity(dim=1, eps=1e-8)

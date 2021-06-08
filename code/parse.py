@@ -27,39 +27,40 @@ def parse_args():
     parser.add_argument('--pretrain', type=int, default=0, help='whether we use pretrained weight or not')
     parser.add_argument('--seed', type=int, default=2020, help='random seed')
     parser.add_argument('--model', type=str, default='lgn', help='rec-model, support [mf, lgn]')
-    parser.add_argument('--dropout', type=int,default=0,
+
+    parser.add_argument('--dropout', type=int,default=1,
                         help="using the dropout or not")
-    parser.add_argument('--keepprob', type=float,default=0.6,
+    parser.add_argument('--keepprob', type=float,default=0.8,
                         help="the batch size for bpr loss training procedure")
 
-    parser.add_argument('--epochs', type=int, default=1000)
+    parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=0.001,
                         help="the learning rate")
-    parser.add_argument('--bpr_batch', type=int, default=200,
+    parser.add_argument('--bpr_batch', type=int, default=1000,
                         help="the batch size for metric loss training procedure")
     parser.add_argument('--recdim', type=int, default=64,
                         help="the embedding size of lightGCN")
-    parser.add_argument('--layer', type=int, default=1,
+    parser.add_argument('--layer', type=int, default=3,
                         help="the layer num of lightGCN")
     parser.add_argument('--dataset', type=str, default='TAFA-digital-music',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
     parser.add_argument('--comb_method', type=str, default='sum',
-                        help="combination method for combine the convolution layers [sum, mean]")
+                        help="combination method for combine the convolution layers [sum, mean, train, final]")
     
     # metric arguments
-    parser.add_argument('--dist_method', type=str, default='cos', 
+    parser.add_argument('--dist_method', type=str, default='L2', 
                         help="method of calculate distance: [L2, cos]")
 
     # MUL-Loss arguments
     parser.add_argument('--num_neg', type=int, default=10, help="number of negative edges")
-    parser.add_argument('--margin', type=float, default=2.0, help="margin for the mul loss")
+    parser.add_argument('--margin', type=float, default=0.3, help="margin for the mul loss")
     parser.add_argument('--thresh', type=float, default=1.0, help="thresh for the mul loss")
-    parser.add_argument('--alpha', type=float, default=1.25, help="pos, alpha for mul loss")
+    parser.add_argument('--alpha', type=float, default=1.0, help="pos, alpha for mul loss")
     parser.add_argument('--beta', type=float, default=5.0, help="neg, beta for mul loss")
 
     # Norm arguments
     # L2 norm
-    parser.add_argument('--decay', type=float, default=0,
+    parser.add_argument('--decay', type=float, default=1e-4,
                         help="the weight decay for l2 normalizaton")
     # clip norm
     parser.add_argument('--use_clip_norm', dest='use_clip_norm', action='store_true',
