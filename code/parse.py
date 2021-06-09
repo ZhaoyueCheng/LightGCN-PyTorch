@@ -28,12 +28,12 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=2020, help='random seed')
     parser.add_argument('--model', type=str, default='lgn', help='rec-model, support [mf, lgn]')
 
-    parser.add_argument('--dropout', type=int,default=1,
+    parser.add_argument('--dropout', type=int,default=0,
                         help="using the dropout or not")
     parser.add_argument('--keepprob', type=float,default=0.8,
                         help="the batch size for bpr loss training procedure")
 
-    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=1000)
     parser.add_argument('--lr', type=float, default=0.001,
                         help="the learning rate")
     parser.add_argument('--bpr_batch', type=int, default=1000,
@@ -44,7 +44,7 @@ def parse_args():
                         help="the layer num of lightGCN")
     parser.add_argument('--dataset', type=str, default='TAFA-digital-music',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
-    parser.add_argument('--comb_method', type=str, default='sum',
+    parser.add_argument('--comb_method', type=str, default='mean',
                         help="combination method for combine the convolution layers [sum, mean, train, final]")
     
     # metric arguments
@@ -53,9 +53,9 @@ def parse_args():
 
     # MUL-Loss arguments
     parser.add_argument('--num_neg', type=int, default=10, help="number of negative edges")
-    parser.add_argument('--margin', type=float, default=0.3, help="margin for the mul loss")
+    parser.add_argument('--margin', type=float, default=1.0, help="margin for the mul loss")
     parser.add_argument('--thresh', type=float, default=1.0, help="thresh for the mul loss")
-    parser.add_argument('--alpha', type=float, default=1.0, help="pos, alpha for mul loss")
+    parser.add_argument('--alpha', type=float, default=0.7, help="pos, alpha for mul loss")
     parser.add_argument('--beta', type=float, default=5.0, help="neg, beta for mul loss")
 
     # Norm arguments
@@ -74,5 +74,10 @@ def parse_args():
     parser.set_defaults(use_fro_norm=False)
     parser.add_argument('--fro_norm', type=float, default=1.0,
                         help="fro_norm value")
+    #pair norm
+    parser.add_argument('--norm_mode', type=str, default='PN', 
+                        help="method of pairnorm: ['None', 'PN', 'PN-SI', 'PN-SCS']")
+    parser.add_argument('--norm_scale', type=float, default=1, 
+                        help="scale of pair norm")
 
     return parser.parse_args()

@@ -65,6 +65,8 @@ config['use_clip_norm'] = args.use_clip_norm
 config['clip_norm'] = args.clip_norm
 config['use_fro_norm'] = args.use_fro_norm
 config['fro_norm'] = args.fro_norm
+config['norm_mode'] = args.norm_mode
+config['norm_scale'] = args.norm_scale
 
 GPU = torch.cuda.is_available()
 device = torch.device('cuda' if GPU else "cpu")

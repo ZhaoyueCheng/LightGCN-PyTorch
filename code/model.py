@@ -102,6 +102,8 @@ class LightGCN(BasicModel):
         self.thresh = self.config['thresh']
         self.comb_method = self.config['comb_method']
         self.dist_method = self.config['dist_method']
+        self.norm_mode = self.config['norm_mode']
+        self.norm_scale = self.config['norm_scale']
         self.embedding_user = torch.nn.Embedding(
             num_embeddings=self.num_users, embedding_dim=self.latent_dim)
         self.embedding_item = torch.nn.Embedding(
@@ -119,6 +121,28 @@ class LightGCN(BasicModel):
         self.f = nn.Sigmoid()
         self.Graph = self.dataset.getSparseGraph()
         print(f"lgn is already to go(dropout:{self.config['dropout']})")
+
+    def pairnorm(self, x):
+        if self.norm_mode == 'None':
+            return x
+
+        col_mean = x.mean(dim=0)
+
+        if self.norm_mode == 'PN':
+            x = x - col_mean
+            rownorm_mean = (1e-6 + x.pow(2).sum(dim=1).mean()).sqrt()
+            x = self.norm_scale * x / rownorm_mean
+
+        elif self.norm_mode == 'PN-SI':
+            x = x - col_mean
+            rownorm_individual = (1e-6 + x.pow(2).sum(dim=1, keepdim=True)).sqrt()
+            x = self.norm_scale * x / rownorm_individual
+
+        elif self.norm_mode == 'PN-SCS':
+            rownorm_individual = (1e-6 + x.pow(2).sum(dim=1, keepdim=True)).sqrt()
+            x = self.norm_scale * x / rownorm_individual - col_mean
+
+        return x
 
         # print("save_txt")
     def __dropout_x(self, x, keep_prob):
@@ -148,6 +172,7 @@ class LightGCN(BasicModel):
         users_emb = self.embedding_user.weight
         items_emb = self.embedding_item.weight
         all_emb = torch.cat([users_emb, items_emb])
+        all_emb = self.pairnorm(all_emb)
         #   torch.split(all_emb , [self.num_users, self.num_items])
 
         if print_norm:
@@ -173,6 +198,7 @@ class LightGCN(BasicModel):
                 all_emb = side_emb
             else:
                 all_emb = torch.sparse.mm(g_droped, all_emb)
+            all_emb = self.pairnorm(all_emb)
             embs.append(all_emb)
         embs = torch.stack(embs, dim=1)
 
