@@ -127,7 +127,6 @@ class LightGCN(BasicModel):
             return x
 
         col_mean = x.mean(dim=0)
-
         if self.norm_mode == 'PN':
             x = x - col_mean
             rownorm_mean = (1e-6 + x.pow(2).sum(dim=1).mean()).sqrt()
@@ -172,7 +171,6 @@ class LightGCN(BasicModel):
         users_emb = self.embedding_user.weight
         items_emb = self.embedding_item.weight
         all_emb = torch.cat([users_emb, items_emb])
-        all_emb = self.pairnorm(all_emb)
         #   torch.split(all_emb , [self.num_users, self.num_items])
 
         if print_norm:
@@ -180,6 +178,8 @@ class LightGCN(BasicModel):
             print("Item norm at 0th layer:", (items_emb**2).sum(1).mean().item())
 
         embs = [all_emb]
+        all_emb = self.pairnorm(all_emb)
+        
         if self.config['dropout']:
             if self.training:
                 # print("droping")
@@ -198,8 +198,8 @@ class LightGCN(BasicModel):
                 all_emb = side_emb
             else:
                 all_emb = torch.sparse.mm(g_droped, all_emb)
-            all_emb = self.pairnorm(all_emb)
             embs.append(all_emb)
+            all_emb = self.pairnorm(all_emb)
         embs = torch.stack(embs, dim=1)
 
         if self.comb_method == 'mean':

@@ -40,7 +40,7 @@ def parse_args():
                         help="the batch size for metric loss training procedure")
     parser.add_argument('--recdim', type=int, default=64,
                         help="the embedding size of lightGCN")
-    parser.add_argument('--layer', type=int, default=3,
+    parser.add_argument('--layer', type=int, default=7,
                         help="the layer num of lightGCN")
     parser.add_argument('--dataset', type=str, default='TAFA-digital-music',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument('--num_neg', type=int, default=10, help="number of negative edges")
     parser.add_argument('--margin', type=float, default=1.0, help="margin for the mul loss")
     parser.add_argument('--thresh', type=float, default=1.0, help="thresh for the mul loss")
-    parser.add_argument('--alpha', type=float, default=0.7, help="pos, alpha for mul loss")
+    parser.add_argument('--alpha', type=float, default=1.25, help="pos, alpha for mul loss")
     parser.add_argument('--beta', type=float, default=5.0, help="neg, beta for mul loss")
 
     # Norm arguments
@@ -77,7 +77,7 @@ def parse_args():
     #pair norm
     parser.add_argument('--norm_mode', type=str, default='PN', 
                         help="method of pairnorm: ['None', 'PN', 'PN-SI', 'PN-SCS']")
-    parser.add_argument('--norm_scale', type=float, default=1, 
+    parser.add_argument('--norm_scale', type=float, default=1.0, 
                         help="scale of pair norm")
 
     return parser.parse_args()
