@@ -37,8 +37,7 @@ def Metric_train_original(dataset, recommend_model, loss_class, epoch, sampler, 
     # negItems = negItems.to(world.device)
     # users, posItems, negItems = utils.shuffle(users,  posItems, negItems)
     total_batch = dataset.n_users // batch_size
-    aver_neg_loss = 0.
-    aver_pos_loss = 0.
+    aver_metric_loss = 0.
     aver_reg_loss = 0.
     for k in range(total_batch):
         samples = sampler.next_batch()
@@ -47,18 +46,15 @@ def Metric_train_original(dataset, recommend_model, loss_class, epoch, sampler, 
         # S, num_items_per_user = utils.UniformSample_original(dataset, 
         #                                 user_idx[k * batch_size: (k + 1) * batch_size], 
         #                                 neg_k=neg_k)
-        neg_loss, pos_loss, reg_loss = metric.stageOne(S, num_items_per_user)
-        aver_neg_loss += neg_loss
-        aver_pos_loss += pos_loss
+        metric_loss, reg_loss = metric.stageOne(S, num_items_per_user)
+        aver_metric_loss += metric_loss
         aver_reg_loss += reg_loss
         if world.tensorboard:
-            w.add_scalar(f'BPRNegLoss/BPR', neg_loss, epoch * total_batch + k)
-            w.add_scalar(f'BPRPosLoss/BPR', pos_loss, epoch * total_batch + k)
-            w.add_scalar(f'BPRRegLoss/BPR', reg_loss, epoch * total_batch + k)
-    aver_neg_loss = aver_neg_loss / total_batch
-    aver_pos_loss = aver_pos_loss / total_batch
+            w.add_scalar(f'MetricLoss/BPR', metric_loss, epoch * total_batch + k)
+            w.add_scalar(f'RegLoss/BPR', reg_loss, epoch * total_batch + k)
+    aver_metric_loss = aver_metric_loss / total_batch
     aver_reg_loss = aver_reg_loss / total_batch
-    return f"[aver neg loss{aver_neg_loss:.3e}, aver pos loss{aver_pos_loss:.3e}, aver reg loss{aver_reg_loss:.3e}]"
+    return f"[aver metric loss{aver_metric_loss:.3e}, aver reg loss{aver_reg_loss:.3e}]"
     
     
 def test_one_batch(X):
@@ -104,8 +100,16 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=0):
         groundTrue_list = []
         auc_record = []
         total_batch = len(users) // u_batch_size + 1
+
         all_users, all_items = Recmodel.computer(True)
+
+        # all_users = Recmodel.embedding_user.weight
+        # all_items = Recmodel.embedding_item.weight
+
         items_emb = all_items.unsqueeze(0)
+
+        avg_dist = 0
+        avg_pos_dist = 0
 
         for batch_users in utils.minibatch(users, batch_size=u_batch_size):
             allPos = dataset.getUserPosItems(batch_users)
@@ -119,12 +123,17 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=0):
                 rating = -torch.sum((users_emb - items_emb) ** 2, 2)
             elif dist_method == 'cos':
                 rating = cos(users_emb, items_emb)
+
+            avg_dist -= rating.mean().item() / float(total_batch)
             
             exclude_index = []
             exclude_items = []
             for range_i, items in enumerate(allPos):
                 exclude_index.extend([range_i] * len(items))
                 exclude_items.extend(items)
+
+            avg_pos_dist -= rating[exclude_index, exclude_items].mean().item() / float(total_batch)
+
             rating[exclude_index, exclude_items] = np.NINF
             _, rating_K = torch.topk(rating, k=max_K)
             rating = rating.cpu().numpy()
@@ -138,6 +147,9 @@ def Test(dataset, Recmodel, epoch, w=None, multicore=0):
             users_list.append(batch_users)
             rating_list.append(rating_K.cpu())
             groundTrue_list.append(groundTrue)
+
+        print("Avg dist:", avg_dist, "Avg pos dist:", avg_pos_dist)
+
         assert total_batch == len(users_list)
         X = zip(rating_list, groundTrue_list)
         if multicore == 1:

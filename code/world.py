@@ -50,9 +50,16 @@ config['comb_method'] = args.comb_method
 # metric config
 config['dist_method'] = args.dist_method
 
-# metric learning config
-config['margin'] = args.margin
+# augmetation config
 config['num_neg'] = args.num_neg
+config['aug_method'] = args.aug_method
+config['n_inner_pts'] = args.n_inner_pts
+config['aug_norm'] = args.aug_norm
+config['num_synthetic'] = args.num_synthetic
+
+# loss config
+config['margin'] = args.margin
+config['loss'] = args.loss
 
 # mul loss config
 config['alpha'] = args.alpha

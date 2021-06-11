@@ -50,12 +50,22 @@ class MetricLoss:
         self.use_fro_norm = config['use_fro_norm']
         self.fro_norm = config['fro_norm']
         self.lr = config['lr']
+        self.loss_func = config['loss']
         self.opt = optim.Adam(recmodel.parameters(), lr=self.lr)
 
     def stageOne(self, S, num_items_per_user):
-        neg_loss, pos_loss, reg_loss = self.model.metric_loss(S, num_items_per_user)
+
+        if self.loss_func == 'MS':
+            metric_loss, reg_loss = self.model.ms_loss(S, num_items_per_user)
+        elif self.loss_func == 'Tri':
+            metric_loss, reg_loss = self.model.triplet_loss(S)
+        elif self.loss_func == 'LS':
+            metric_loss, reg_loss = self.model.lifted_struct_loss(S)
+        elif self.loss_func == 'NP':
+            metric_loss, reg_loss = self.model.n_pair_loss(S)
+
         reg_loss = reg_loss * self.weight_decay
-        loss = neg_loss + pos_loss + reg_loss
+        loss = metric_loss + reg_loss
 
         self.opt.zero_grad()
         loss.backward()
@@ -67,7 +77,7 @@ class MetricLoss:
         if self.use_fro_norm:
             self.model.normalize_fro(self.fro_norm)
 
-        return neg_loss.cpu().item(), pos_loss.cpu().item(), reg_loss.cpu().item()
+        return metric_loss.cpu().item(), reg_loss.cpu().item()
 
 class WarpSampler(object):
     """
