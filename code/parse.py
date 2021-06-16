@@ -46,7 +46,7 @@ def parse_args():
                         help="the batch size for metric loss training procedure")
     parser.add_argument('--recdim', type=int, default=64,
                         help="the embedding size of lightGCN")
-    parser.add_argument('--layer', type=int, default=1,
+    parser.add_argument('--layer', type=int, default=3,
                         help="the layer num of lightGCN")
     parser.add_argument('--dataset', type=str, default='TAFA-digital-music',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
@@ -55,19 +55,17 @@ def parse_args():
     
     # Augmentation arguments
     parser.add_argument('--num_neg', type=int, default=10, help="number of negative edges")
-    parser.add_argument('--aug_method', type=str, default='None',
+    parser.add_argument('--aug_method', type=str, default='simple',
                         help="available augmentation type: [None, simple, mlp]")
     # simple aug
     parser.add_argument('--n_inner_pts', type=int, default=5, help="number of inner points between 2 items")
-    parser.add_argument('--aug_norm', dest='aug_norm', action='store_true',
-                        help="whether we normalize the augmentated items")
-    parser.set_defaults(aug_norm=True)
+    parser.add_argument('--aug_norm', type=str, default='clip',
+                        help="available normalization functions: [None, standard, clip, original, match]")
     parser.add_argument('--num_synthetic', type=int, default=5, help="number of synthetic points")
-
 
     # Loss arguments
     # MS: multi-similarity loss, LS: lifted structure, NP: N-pair loss, Tri: triplet loss
-    parser.add_argument('--loss', type=str, default='NP',
+    parser.add_argument('--loss', type=str, default='MS',
                         help="available loss functions: [MS, LS, NP, Tri]")
     parser.add_argument('--margin', type=float, default=1.0, help="margin for the metric loss")
     # MUL-Loss arguments

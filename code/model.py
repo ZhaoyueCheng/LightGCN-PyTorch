@@ -94,12 +94,14 @@ class LightGCN(BasicModel):
         self.num_items  = self.dataset.m_items
         self.latent_dim = self.config['latent_dim_rec']
         self.n_layers = self.config['lightGCN_n_layers']
+        self.num_neg = self.config['num_neg']
         self.keep_prob = self.config['keep_prob']
         self.A_split = self.config['A_split']
         self.margin = self.config['margin']
         self.alpha = self.config['alpha']
         self.beta = self.config['beta']
         self.thresh = self.config['thresh']
+        self.clip_norm = self.config['clip_norm']
         self.comb_method = self.config['comb_method']
         self.dist_method = self.config['dist_method']
         self.norm_mode = self.config['norm_mode']
@@ -178,9 +180,12 @@ class LightGCN(BasicModel):
         #   torch.split(all_emb , [self.num_users, self.num_items])
 
         if print_norm:
-            print("Avg norm at 0th layer:", ((all_emb-all_emb.mean(0))**2).sum(1).mean().item())
-            print("User norm at 0th layer:", ((users_emb-users_emb.mean(0))**2).sum(1).mean().item())
-            print("Item norm at 0th layer:", ((items_emb-items_emb.mean(0))**2).sum(1).mean().item())
+            avg_norm = ((all_emb)**2).sum(1)
+            print("avg norm 0th:", avg_norm.mean().item(), "std", avg_norm.std().item())
+            avg_norm = ((users_emb)**2).sum(1)
+            print("user norm 0th:", avg_norm.mean().item(), "std", avg_norm.std().item())
+            avg_norm = ((items_emb)**2).sum(1)
+            print("item norm 0th:", avg_norm.mean().item(), "std", avg_norm.std().item())
 
         embs = [all_emb]
         all_emb = self.pairnorm(all_emb)
@@ -221,9 +226,12 @@ class LightGCN(BasicModel):
         if print_norm:
             if self.comb_method == 'train':
                 print(self.layer_comb.mean(dim=0).data)
-            print("Avg norm at final layer:", ((light_out-light_out.mean(0))**2).sum(1).mean().item())
-            print("User norm at final layer:", ((users-users.mean())**2).sum(1).mean().item())
-            print("Item norm at final layer:", ((items-items.mean())**2).sum(1).mean().item())
+            avg_norm = ((light_out)**2).sum(1)
+            print("avg norm final:", avg_norm.mean().item(), "std", avg_norm.std().item())
+            avg_norm = ((users)**2).sum(1)
+            print("user norm final:", avg_norm.mean().item(), "std", avg_norm.std().item())
+            avg_norm = ((items)**2).sum(1)
+            print("item norm final:", avg_norm.mean().item(), "std", avg_norm.std().item())
 
         return users, items
     
@@ -255,10 +263,28 @@ class LightGCN(BasicModel):
 
         (users_emb, pos_emb, neg_emb,
          userEmb0, posEmb0, negEmb0) = self.getEmbedding(users, pos_items, neg_items)
-        
-        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) +
-                              posEmb0.norm(2).pow(2) +
-                              negEmb0.norm(2).pow(2)) / float(len(users))
+
+        # avg_norm = ((userEmb0)**2).sum(1)
+        # print("user norm 0:", avg_norm.mean().item(), "std", avg_norm.std().item())
+        # avg_norm = ((posEmb0)**2).sum(1)
+        # print("pos norm 0:", avg_norm.mean().item(), "std", avg_norm.std().item())
+        # avg_norm = ((negEmb0)**2).sum(1)
+        # print("neg norm 0:", avg_norm.mean().item(), "std", avg_norm.std().item())
+        # avg_norm = ((users_emb)**2).sum(1)
+        # print("user norm final:", avg_norm.mean().item(), "std", avg_norm.std().item())
+        # avg_norm = ((pos_emb)**2).sum(1)
+        # print("pos norm final:", avg_norm.mean().item(), "std", avg_norm.std().item())
+        # avg_norm = ((neg_emb)**2).sum(1)
+        # print("neg norm final:", avg_norm.mean().item(), "std", avg_norm.std().item(), '\n')
+
+        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) + posEmb0.norm(2).pow(2)) / float(len(users)) + \
+                   (1 / 2) * negEmb0.norm(2).pow(2) / float(len(users)*self.num_neg)
+
+        # reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) + posEmb0.norm(2).pow(2)) / float(len(users)) - \
+        #             20 * torch.log(negEmb0.norm(2)) / float(len(users)*self.num_neg)
+
+        if self.aug_method == 'simple':
+            neg_emb = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
 
         if self.dist_method == 'L2':
             # positive item to user distance (N)
@@ -281,19 +307,43 @@ class LightGCN(BasicModel):
 
             num_items_per_user = torch.LongTensor(num_items_per_user)
 
-            # negative mining using max pos length
             pos_lengths = torch.repeat_interleave(torch.tensor(pos_lengths), num_items_per_user)
             pos_lengths = pos_lengths.to(world.device)
-            neg_idx = (distance_to_neg_items - (self.margin + pos_lengths.unsqueeze(-1))) >= 0
-            distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
-            neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.thresh))))
-
-            # positive mining using min neg length
             neg_length = torch.repeat_interleave(torch.tensor(neg_length), num_items_per_user)
             neg_length = neg_length.to(world.device)
-            pos_idx = (pos_distances - (neg_length - self.margin)) <= 0
-            pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
-            pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.thresh))))
+
+            if self.aug_method != None:
+                # negative mining using max pos length
+                distance_to_neg_items = distance_to_neg_items.min(1)[0]
+                neg_idx = (distance_to_neg_items - (self.margin + pos_lengths)) >= 0
+                distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
+                neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.thresh))))
+                # positive mining using min neg length
+                pos_idx = (pos_distances - (neg_length - self.margin)) <= 0
+                pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
+                pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.thresh))))
+            else:
+                # negative mining using max pos length
+                neg_idx = (distance_to_neg_items - (self.margin + pos_lengths.unsqueeze(-1))) >= 0
+                distance_to_neg_items = distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.)
+                neg_loss = 1.0 / self.beta * torch.log(1 + torch.sum(torch.exp(-self.beta * (distance_to_neg_items + self.thresh))))
+                # distance_to_neg_items = torch.exp(-self.beta * (distance_to_neg_items + torch.where(neg_idx, float('inf'), 0.) + self.thresh))
+                # start_idx = 0
+                # neg_loss = 0
+                # for i in num_items_per_user:
+                #     neg_loss += 1.0 / self.beta * torch.log(1 + distance_to_neg_items[start_idx:start_idx+i].sum())
+                #     start_idx += i
+
+                # positive mining using min neg length
+                pos_idx = (pos_distances - (neg_length - self.margin)) <= 0
+                pos_distances = pos_distances + torch.where(pos_idx, -float('inf'), 0.)
+                pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(self.alpha * (pos_distances + self.thresh))))
+                # pos_distances = torch.exp(self.alpha * (pos_distances + torch.where(pos_idx, -float('inf'), 0.) + self.thresh))
+                # start_idx = 0
+                # pos_loss = 0
+                # for i in num_items_per_user:
+                #     pos_loss += 1.0 / self.alpha * torch.log(1 + pos_distances[start_idx:start_idx+i].sum())
+                #     start_idx += i
 
         elif self.dist_method == 'cos':
             cos = torch.nn.CosineSimilarity(dim=1, eps=1e-8)
@@ -332,7 +382,7 @@ class LightGCN(BasicModel):
             pos_distances = pos_distances + torch.where(pos_idx, float('inf'), 0.)
             pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(-self.alpha * (pos_distances - self.thresh)))).sum()
 
-        return neg_loss+pos_loss, reg_loss
+        return (neg_loss+pos_loss)/self.config['bpr_batch_size'], reg_loss
 
     def lifted_struct_loss(self, S):
         users = torch.Tensor(S[:, 0]).long()
@@ -346,16 +396,24 @@ class LightGCN(BasicModel):
         (users_emb, pos_emb, neg_emb,
          userEmb0, posEmb0, negEmb0) = self.getEmbedding(users, pos_items, neg_items)
 
-        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) +
-                              posEmb0.norm(2).pow(2) +
-                              negEmb0.norm(2).pow(2)) / float(len(users))
+        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) + posEmb0.norm(2).pow(2)) / float(len(users)) + \
+                   (1 / 2) * negEmb0.norm(2).pow(2) / float(len(users)*self.num_neg)
+
+        if self.aug_method == 'simple':
+            neg_items = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
+        else:
+            neg_items = neg_emb
 
         user_pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
-        user_neg_distances = torch.sum((users_emb.unsqueeze(-1) - neg_emb.transpose(-2, -1)) ** 2, 1)
-        item_neg_distance = torch.sum((pos_emb.unsqueeze(-1) - neg_emb.transpose(-2, -1)) ** 2, 1)
+        user_neg_distances = torch.sum((users_emb.unsqueeze(-1) - neg_items.transpose(-2, -1)) ** 2, 1)
+        item_neg_distance = torch.sum((pos_emb.unsqueeze(-1) - neg_items.transpose(-2, -1)) ** 2, 1)
 
-        loss = (torch.exp(self.margin - user_neg_distances) + torch.exp(self.margin - item_neg_distance)).sum(1).log() + user_pos_distances
-        loss = (loss ** 2).mean() / 2.0
+        if self.aug_method != 'None':
+            loss = (torch.exp(self.margin - user_neg_distances.min(1)[0]) + torch.exp(self.margin - item_neg_distance.min(1)[0])).log() + user_pos_distances
+            loss = (loss ** 2).mean() / 2.0
+        else:
+            loss = (torch.exp(self.margin - user_neg_distances) + torch.exp(self.margin - item_neg_distance)).sum(1).log() + user_pos_distances
+            loss = (loss ** 2).mean() / 2.0
 
         return loss, reg_loss
 
@@ -371,16 +429,21 @@ class LightGCN(BasicModel):
         (users_emb, pos_emb, neg_emb,
          userEmb0, posEmb0, negEmb0) = self.getEmbedding(users, pos_items, neg_items)
 
-        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) +
-                              posEmb0.norm(2).pow(2) +
-                              negEmb0.norm(2).pow(2)) / float(len(users))
+        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) + posEmb0.norm(2).pow(2)) / float(len(users)) + \
+                   (1 / 2) * negEmb0.norm(2).pow(2) / float(len(users)*self.num_neg)
+
+        if self.aug_method == 'simple':
+            neg_items = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
+        else:
+            neg_items = neg_emb
 
         pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
-        neg_distances = torch.sum((users_emb.unsqueeze(-1) - neg_emb.transpose(-2, -1)) ** 2, 1)
+        neg_distances = torch.sum((users_emb.unsqueeze(-1) - neg_items.transpose(-2, -1)) ** 2, 1)
 
-        print(torch.exp(pos_distances.unsqueeze(-1) - neg_distances).sum(1).shape)
-
-        loss = torch.mean(torch.log(1 + torch.exp(pos_distances.unsqueeze(-1) - neg_distances).sum(1)))
+        if self.aug_method != 'None':
+            loss = torch.mean(torch.log(1 + torch.exp(pos_distances - neg_distances.min(1)[0])))
+        else:
+            loss = torch.mean(torch.log(1 + torch.exp(pos_distances.unsqueeze(-1) - neg_distances).sum(1)))
 
         return loss, reg_loss
 
@@ -397,9 +460,8 @@ class LightGCN(BasicModel):
         (users_emb, pos_emb, neg_emb,
          userEmb0, posEmb0, negEmb0) = self.getEmbedding(users, pos_items, neg_items)
 
-        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) +
-                              posEmb0.norm(2).pow(2) +
-                              negEmb0.norm(2).pow(2)) / float(len(users))
+        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) + posEmb0.norm(2).pow(2)) / float(len(users)) + \
+                   (1 / 2) * negEmb0.norm(2).pow(2) / float(len(users)*self.num_neg)
 
         if self.aug_method == 'simple':
             neg_items = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
@@ -407,7 +469,8 @@ class LightGCN(BasicModel):
             neg_items = neg_emb
 
         pos_distances = torch.sum((users_emb - pos_emb) ** 2, 1)
-        
+        neg_distances = torch.sum((users_emb.unsqueeze(-1) - neg_items.transpose(-2, -1)) ** 2, 1)
+
         closest_negative_item_distances = neg_distances.min(1)[0]
 
         distance = pos_distances - closest_negative_item_distances + self.margin
@@ -434,17 +497,16 @@ class LightGCN(BasicModel):
         self.embedding_user.weight.data /= self.embedding_user.weight.data.norm('fro', dim=-1).unsqueeze(-1)
         self.embedding_item.weight.data /= self.embedding_item.weight.data.norm('fro', dim=-1).unsqueeze(-1)
 
-    def get_embedding_aug(self, embeddings, n_inner_pts=5, normalize=True, num_synthetic=5):
+    def get_embedding_aug(self, embeddings, n_inner_pts=5, normalize='None', num_synthetic=5):
 
         # N = batch size,
         # K = embedding size,
         # W = number of negative samples per a user-positive-item pair
 
         # negative item embedding (N, W, K)
-        num_neg = embeddings.shape[1]
 
         import itertools
-        all_combinations = list(itertools.combinations(range(num_neg), 2))
+        all_combinations = list(itertools.combinations(range(self.num_neg), 2))
         import random
         random.shuffle(all_combinations)
         all_combinations = all_combinations[:num_synthetic]
@@ -465,16 +527,21 @@ class LightGCN(BasicModel):
 
             inner_pts = (axes_embeddings_0 * left_length + axes_embeddings_1 * right_length) / total_length
 
-            if normalize:
-                ## normalize by clipping normalize
-                # inner_pts = clip_by_norm(inner_pts, self.clip_norm)
-                ## normalize by standard normalize function
+            if normalize == 'standard':
                 inner_pts = torch.nn.functional.normalize(inner_pts, 2, -1)
-
-                # # test normalize again with original norm
-                # original_norm = (torch.norm(axes_embeddings_0, dim=-1) * left_length +
-                #                  torch.norm(axes_embeddings_1, dim=-1) * right_length) / total_length
-                # inner_pts = inner_pts * original_norm.unsqueeze(-1)
+            elif normalize == 'clip':
+                inner_norm = (inner_pts ** 2).sum(-1, keepdim=True)
+                inner_pts = torch.where(inner_norm < self.clip_norm ** 2,
+                                        inner_pts,
+                                        inner_pts * self.clip_norm / (inner_norm + 1e-12))
+            elif normalize == 'original':
+                original_norm = (torch.norm(axes_embeddings_0, dim=-1) * left_length +
+                                 torch.norm(axes_embeddings_1, dim=-1) * right_length) / total_length
+                inner_pts = inner_pts * original_norm.unsqueeze(-1)
+            elif normalize == 'match':
+                original_norm = (torch.norm(axes_embeddings_0, dim=-1) * left_length +
+                                 torch.norm(axes_embeddings_1, dim=-1) * right_length) / total_length
+                inner_pts = inner_pts * (original_norm / torch.norm(inner_pts, dim=-1)).unsqueeze(-1)
 
             concat_embeddings = torch.cat((concat_embeddings, inner_pts), dim=1)
 
