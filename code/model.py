@@ -12,7 +12,8 @@ import torch
 from dataloader import BasicDataset
 from torch import nn
 import numpy as np
-
+import random
+import itertools
 
 class BasicModel(nn.Module):    
     def __init__(self):
@@ -110,11 +111,20 @@ class LightGCN(BasicModel):
         self.n_inner_pts = self.config['n_inner_pts']
         self.aug_norm = self.config['aug_norm']
         self.num_synthetic = self.config['num_synthetic']
+        self.num_inter = self.config['num_inter']
+        
         self.embedding_user = torch.nn.Embedding(
             num_embeddings=self.num_users, embedding_dim=self.latent_dim)
         self.embedding_item = torch.nn.Embedding(
             num_embeddings=self.num_items, embedding_dim=self.latent_dim)
-        self.layer_comb = torch.nn.parameter.Parameter(torch.ones(self.num_users+self.num_items, self.n_layers+1))
+
+        if self.aug_method == 'mlp':
+            self.mlp = MLP((1+self.num_inter)*self.latent_dim, self.num_inter)
+            self.mlp_optimizer = torch.optim.Adam(params=self.mlp.parameters(),
+                                    lr=self.config['lr'], weight_decay=self.config['decay'])
+
+        if self.comb_method == 'train':
+            self.layer_comb = torch.nn.parameter.Parameter(torch.ones(self.num_users+self.num_items, self.n_layers+1))
 
         if self.config['pretrain'] == 0:
             nn.init.xavier_uniform_(self.embedding_user.weight, gain=1)
@@ -285,6 +295,8 @@ class LightGCN(BasicModel):
 
         if self.aug_method == 'simple':
             neg_emb = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
+        elif self.aug_method == 'mlp':
+            neg_emb = self.mlp_aug(users_emb, neg_emb, self.aug_norm, self.num_synthetic)
 
         if self.dist_method == 'L2':
             # positive item to user distance (N)
@@ -401,6 +413,8 @@ class LightGCN(BasicModel):
 
         if self.aug_method == 'simple':
             neg_items = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
+        elif self.aug_method == 'mlp':
+            neg_items = self.mlp_aug(users_emb, neg_emb, self.aug_norm, self.num_synthetic)
         else:
             neg_items = neg_emb
 
@@ -434,6 +448,8 @@ class LightGCN(BasicModel):
 
         if self.aug_method == 'simple':
             neg_items = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
+        elif self.aug_method == 'mlp':
+            neg_items = self.mlp_aug(users_emb, neg_emb, self.aug_norm, self.num_synthetic)
         else:
             neg_items = neg_emb
 
@@ -465,6 +481,8 @@ class LightGCN(BasicModel):
 
         if self.aug_method == 'simple':
             neg_items = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
+        elif self.aug_method == 'mlp':
+            neg_items = self.mlp_aug(users_emb, neg_emb, self.aug_norm, self.num_synthetic)
         else:
             neg_items = neg_emb
 
@@ -504,10 +522,7 @@ class LightGCN(BasicModel):
         # W = number of negative samples per a user-positive-item pair
 
         # negative item embedding (N, W, K)
-
-        import itertools
         all_combinations = list(itertools.combinations(range(self.num_neg), 2))
-        import random
         random.shuffle(all_combinations)
         all_combinations = all_combinations[:num_synthetic]
 
@@ -546,3 +561,64 @@ class LightGCN(BasicModel):
             concat_embeddings = torch.cat((concat_embeddings, inner_pts), dim=1)
 
         return concat_embeddings
+
+    def mlp_aug(self, users, embeddings, normalize='None', num_synthetic=5):
+
+        all_combinations = list(itertools.combinations(range(self.num_neg), self.num_inter))
+        random.shuffle(all_combinations)
+        if (num_synthetic >= len(all_combinations)):
+            num_synthetic = len(all_combinations)
+        all_combinations = all_combinations[:num_synthetic]
+
+        axes_embeddings = embeddings.clone()[:, all_combinations, :]
+        concat_embeddings = embeddings.clone()
+
+        aug_negs = []
+        for i in range(num_synthetic):
+            mlp_input = torch.cat((axes_embeddings[:, i, :, :], users.unsqueeze(1)), dim=1)
+            mlp_input = mlp_input.flatten(1)
+            neg_weights = self.mlp(mlp_input)
+            aug_negs.append((neg_weights.unsqueeze(-1)*axes_embeddings[:, i, :, :]).sum(1))
+        aug_negs = torch.stack(aug_negs)
+        mlp_loss = ((users.unsqueeze(0) - aug_negs) ** 2).sum()
+        # print("mlp loss:", mlp_loss.item())
+        self.mlp_optimizer.zero_grad()
+        mlp_loss.backward(retain_graph=True)
+        self.mlp_optimizer.step()
+
+        for i in range(num_synthetic):
+            mlp_input = torch.cat((axes_embeddings[:, i, :, :], users.unsqueeze(1)), dim=1)
+            mlp_input = mlp_input.flatten(1)
+            neg_weights = self.mlp(mlp_input)
+            inner_pts = (neg_weights.unsqueeze(-1)*axes_embeddings[:, i, :, :]).sum(1)
+            if normalize == 'standard':
+                inner_pts = torch.nn.functional.normalize(inner_pts, 2, -1)
+            concat_embeddings = torch.cat((concat_embeddings, inner_pts.unsqueeze(1)), dim=1)
+
+        return concat_embeddings
+
+
+class MLP(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 output_dim,
+                 hidden_dim=128,
+                 dropout_rate=0.2):
+        """
+        Simple two-hidden-layer-MLP
+        :param input_dim:
+        :param hidden_dim:
+        :param output_dim:
+        """
+        super(MLP, self).__init__()
+        self.layers = nn.Sequential(
+                nn.Linear(input_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout_rate),
+                nn.Linear(hidden_dim, output_dim),
+                nn.Softmax(dim=-1)
+        )
+
+    def forward(self, input):
+
+        return self.layers(input)

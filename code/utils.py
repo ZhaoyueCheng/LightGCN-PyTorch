@@ -51,7 +51,7 @@ class MetricLoss:
         self.fro_norm = config['fro_norm']
         self.lr = config['lr']
         self.loss_func = config['loss']
-        self.opt = optim.Adam(recmodel.parameters(), lr=self.lr)
+        self.opt = optim.Adam((recmodel.embedding_user.weight, recmodel.embedding_item.weight), lr=self.lr)
 
     def stageOne(self, S, num_items_per_user):
 

@@ -46,26 +46,28 @@ def parse_args():
                         help="the batch size for metric loss training procedure")
     parser.add_argument('--recdim', type=int, default=64,
                         help="the embedding size of lightGCN")
-    parser.add_argument('--layer', type=int, default=3,
+    parser.add_argument('--layer', type=int, default=1,
                         help="the layer num of lightGCN")
-    parser.add_argument('--dataset', type=str, default='TAFA-digital-music',
+    parser.add_argument('--dataset', type=str, default='amazon-cd',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
-    parser.add_argument('--comb_method', type=str, default='sum',
+    parser.add_argument('--comb_method', type=str, default='mean',
                         help="combination method for combine the convolution layers [sum, mean, train, final]")
     
     # Augmentation arguments
     parser.add_argument('--num_neg', type=int, default=10, help="number of negative edges")
-    parser.add_argument('--aug_method', type=str, default='simple',
+    parser.add_argument('--aug_method', type=str, default='None',
                         help="available augmentation type: [None, simple, mlp]")
     # simple aug
     parser.add_argument('--n_inner_pts', type=int, default=5, help="number of inner points between 2 items")
-    parser.add_argument('--aug_norm', type=str, default='clip',
+    parser.add_argument('--aug_norm', type=str, default='standard',
                         help="available normalization functions: [None, standard, clip, original, match]")
     parser.add_argument('--num_synthetic', type=int, default=5, help="number of synthetic points")
+    # mlp aug
+    parser.add_argument('--num_inter', type=int, default=2, help="number of points to interpolate")
 
     # Loss arguments
     # MS: multi-similarity loss, LS: lifted structure, NP: N-pair loss, Tri: triplet loss
-    parser.add_argument('--loss', type=str, default='MS',
+    parser.add_argument('--loss', type=str, default='NP',
                         help="available loss functions: [MS, LS, NP, Tri]")
     parser.add_argument('--margin', type=float, default=1.0, help="margin for the metric loss")
     # MUL-Loss arguments

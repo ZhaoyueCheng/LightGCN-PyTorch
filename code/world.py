@@ -57,6 +57,7 @@ config['aug_method'] = args.aug_method
 config['n_inner_pts'] = args.n_inner_pts
 config['aug_norm'] = args.aug_norm
 config['num_synthetic'] = args.num_synthetic
+config['num_inter'] = args.num_inter
 
 # loss config
 config['margin'] = args.margin
