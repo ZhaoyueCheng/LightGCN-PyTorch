@@ -63,6 +63,8 @@ class MetricLoss:
             metric_loss, reg_loss = self.model.lifted_struct_loss(S)
         elif self.loss_func == 'NP':
             metric_loss, reg_loss = self.model.n_pair_loss(S)
+        elif self.loss_func == "Cir":
+            metric_loss, reg_loss = self.model.circle_loss(S)
 
         reg_loss = reg_loss * self.weight_decay
         loss = metric_loss + reg_loss

@@ -68,6 +68,9 @@ config['alpha'] = args.alpha
 config['beta'] = args.beta
 config['thresh'] = args.thresh
 
+# circle loss config
+config['gamma'] = args.gamma
+
 # norm config
 config['decay'] = args.decay
 config['use_clip_norm'] = args.use_clip_norm

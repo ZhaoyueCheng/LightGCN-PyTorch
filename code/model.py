@@ -102,6 +102,7 @@ class LightGCN(BasicModel):
         self.alpha = self.config['alpha']
         self.beta = self.config['beta']
         self.thresh = self.config['thresh']
+        self.gamma = self.config['gamma']
         self.clip_norm = self.config['clip_norm']
         self.comb_method = self.config['comb_method']
         self.dist_method = self.config['dist_method']
@@ -159,7 +160,6 @@ class LightGCN(BasicModel):
 
         return x
 
-        # print("save_txt")
     def __dropout_x(self, x, keep_prob):
         size = x.size()
         index = x.indices().t()
@@ -395,6 +395,44 @@ class LightGCN(BasicModel):
             pos_loss = 1.0 / self.alpha * torch.log(1 + torch.sum(torch.exp(-self.alpha * (pos_distances - self.thresh)))).sum()
 
         return (neg_loss+pos_loss)/self.config['bpr_batch_size'], reg_loss
+
+    def circle_loss(self, S):
+        users = torch.Tensor(S[:, 0]).long()
+        pos_items = torch.Tensor(S[:, 1]).long()
+        neg_items = torch.Tensor(S[:, 2:]).long()
+
+        users = users.to(world.device)
+        pos_items = pos_items.to(world.device)
+        neg_items = neg_items.to(world.device)
+
+        (users_emb, pos_emb, neg_emb,
+         userEmb0, posEmb0, negEmb0) = self.getEmbedding(users, pos_items, neg_items)
+
+        reg_loss = (1 / 2) * (userEmb0.norm(2).pow(2) + posEmb0.norm(2).pow(2)) / float(len(users)) + \
+                   (1 / 2) * negEmb0.norm(2).pow(2) / float(len(users)*self.num_neg)
+
+        if self.aug_method == 'simple':
+            neg_items = self.get_embedding_aug(neg_emb, self.n_inner_pts, self.aug_norm, self.num_synthetic)
+        elif self.aug_method == 'mlp':
+            neg_items = self.mlp_aug(users_emb, neg_emb, self.aug_norm, self.num_synthetic)
+        else:
+            neg_items = neg_emb
+
+        sp = torch.sum((users_emb - pos_emb) ** 2, 1)
+        sn = torch.sum((users_emb.unsqueeze(-1) - neg_items.transpose(-2, -1)) ** 2, 1).flatten()
+
+        ap = torch.clamp_min(sp.detach() + self.margin, min=0.)
+        an = torch.clamp_min(-sn.detach() + 1 + self.margin, min=0.)
+
+        delta_p = self.margin
+        delta_n = 1 - self.margin
+
+        logit_p = ap * (sp - delta_p) * self.gamma
+        logit_n = -an * (sn - delta_n) * self.gamma
+
+        loss = nn.Softplus()(torch.logsumexp(logit_n, dim=0) + torch.logsumexp(logit_p, dim=0))
+
+        return loss, reg_loss
 
     def lifted_struct_loss(self, S):
         users = torch.Tensor(S[:, 0]).long()

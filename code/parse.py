@@ -39,7 +39,7 @@ def parse_args():
                         help="the batch size for bpr loss training procedure")
 
     # model parameters
-    parser.add_argument('--epochs', type=int, default=500)
+    parser.add_argument('--epochs', type=int, default=1000)
     parser.add_argument('--lr', type=float, default=0.001,
                         help="the learning rate")
     parser.add_argument('--bpr_batch', type=int, default=1000,
@@ -48,9 +48,9 @@ def parse_args():
                         help="the embedding size of lightGCN")
     parser.add_argument('--layer', type=int, default=1,
                         help="the layer num of lightGCN")
-    parser.add_argument('--dataset', type=str, default='amazon-cd',
+    parser.add_argument('--dataset', type=str, default='Amazon-CD-5',
                         help="available datasets: [lastfm, gowalla, yelp2018, amazon]")
-    parser.add_argument('--comb_method', type=str, default='mean',
+    parser.add_argument('--comb_method', type=str, default='sum',
                         help="combination method for combine the convolution layers [sum, mean, train, final]")
     
     # Augmentation arguments
@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument('--aug_method', type=str, default='None',
                         help="available augmentation type: [None, simple, mlp]")
     # simple aug
-    parser.add_argument('--n_inner_pts', type=int, default=5, help="number of inner points between 2 items")
+    parser.add_argument('--n_inner_pts', type=int, default=3, help="number of inner points between 2 items")
     parser.add_argument('--aug_norm', type=str, default='standard',
                         help="available normalization functions: [None, standard, clip, original, match]")
     parser.add_argument('--num_synthetic', type=int, default=5, help="number of synthetic points")
@@ -67,13 +67,15 @@ def parse_args():
 
     # Loss arguments
     # MS: multi-similarity loss, LS: lifted structure, NP: N-pair loss, Tri: triplet loss
-    parser.add_argument('--loss', type=str, default='NP',
-                        help="available loss functions: [MS, LS, NP, Tri]")
-    parser.add_argument('--margin', type=float, default=1.0, help="margin for the metric loss")
+    parser.add_argument('--loss', type=str, default='Cir',
+                        help="available loss functions: [MS, LS, NP, Tri, Cir]")
+    parser.add_argument('--margin', type=float, default=0.1, help="margin for the metric loss")
     # MUL-Loss arguments
     parser.add_argument('--thresh', type=float, default=1.0, help="thresh for the mul loss")
     parser.add_argument('--alpha', type=float, default=1.25, help="pos, alpha for mul loss")
     parser.add_argument('--beta', type=float, default=5.0, help="neg, beta for mul loss")
+    # Circle loss arguments
+    parser.add_argument('--gamma', type=float, default=1, help="gamma for circle loss")
 
     # Norm arguments
     # L2 norm
