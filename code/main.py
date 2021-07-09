@@ -40,22 +40,30 @@ if __name__ == '__main__':
         world.cprint("not enable tensorflowboard")
 
     # init sampler
-    sampler = utils.WarpSampler(dataset, world.config['bpr_batch_size'])
+    sampler = utils.WarpSampler(dataset, world.config['bpr_batch_size'], world.config['num_neg'])
         
     try:
+        results = []
         for epoch in range(world.TRAIN_epochs):
             print('======================')
             print(f'EPOCH[{epoch}/{world.TRAIN_epochs}]')
             start = time.time()
             if epoch % 10 == 0:
                 cprint("[TEST]")
-                Procedure.Test(dataset, Recmodel, epoch, w, world.config['multicore'])
+                result = Procedure.Test(dataset, Recmodel, epoch, w, world.config['multicore'])
+                results.append(np.append(result['recall'], result['ndcg']))
+                best_idx = np.array(results).sum(axis=1).argmax()
+                print("Best so far:", results[best_idx])
             output_information = Procedure.BPR_train_original(dataset, Recmodel, bpr, epoch, sampler, neg_k=Neg_k,w=w)
             
             print(f'[saved][{output_information}]')
             torch.save(Recmodel.state_dict(), weight_file)
             print(f"[TOTAL TIME] {time.time() - start}")
-        Procedure.Test(dataset, Recmodel, epoch, w, world.config['multicore'])
+        result = Procedure.Test(dataset, Recmodel, epoch, w, world.config['multicore'])
+        results.append(np.append(result['recall'], result['ndcg']))
+        results = np.array(results)
+        best_idx = results.sum(axis=1).argmax()
+        print("Best over all:", results[best_idx])
     finally:
         sampler.close()
         if world.tensorboard:

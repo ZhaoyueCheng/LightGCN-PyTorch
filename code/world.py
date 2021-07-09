@@ -44,6 +44,7 @@ config['multicore'] = args.multicore
 config['lr'] = args.lr
 config['decay'] = args.decay
 config['pretrain'] = args.pretrain
+config['num_neg'] = args.num_neg
 config['A_split'] = False
 config['bigdata'] = False
 

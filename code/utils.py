@@ -45,7 +45,7 @@ class WarpSampler(object):
     of the shapes (Batch Size, 2) and (Batch Size, N_Negative)
     """
 
-    def __init__(self, dataset, batch_size=1000, n_workers=5):
+    def __init__(self, dataset, batch_size=1000, num_neg=10, n_workers=5):
         self.result_queue = Queue(maxsize=n_workers * 2)
         self.processors = []
         for i in range(n_workers):
@@ -55,6 +55,7 @@ class WarpSampler(object):
                                                             dataset.m_item,
                                                             dataset.trainDataSize,
                                                             batch_size,
+                                                            num_neg,
                                                             self.result_queue)))
             self.processors[-1].start()
 
@@ -66,7 +67,7 @@ class WarpSampler(object):
             p.terminate()
             p.join()
 
-def UniformSample_original(allPos, num_users, num_items, user_num, batch_size, result_queue):
+def UniformSample_original(allPos, num_users, num_items, num_train, batch_size, num_neg, result_queue):
     """
     the original impliment of BPR Sampling in LightGCN
     :return:
@@ -74,8 +75,8 @@ def UniformSample_original(allPos, num_users, num_items, user_num, batch_size, r
     """
 
     while True:
-        users = np.random.randint(0, num_users, user_num)
-        for k in range(int(user_num / batch_size)):
+        users = np.random.randint(0, num_users, num_train)
+        for k in range(int(num_train / batch_size)):
 
             S = []
 
@@ -83,15 +84,16 @@ def UniformSample_original(allPos, num_users, num_items, user_num, batch_size, r
                 posForUser = allPos[user]
                 if len(posForUser) == 0:
                     continue
-                posindex = np.random.randint(0, len(posForUser))
-                positem = posForUser[posindex]
-                while True:
-                    negitem = np.random.randint(0, num_items)
-                    if negitem in posForUser:
-                        continue
-                    else:
-                        break
-                S.append([user, positem, negitem])
+                for n in range(num_neg):
+                    posindex = np.random.randint(0, len(posForUser))
+                    positem = posForUser[posindex]
+                    while True:
+                        negitem = np.random.randint(0, num_items)
+                        if negitem in posForUser:
+                            continue
+                        else:
+                            break
+                    S.append([user, positem, negitem])
 
             result_queue.put(np.array(S))
 
